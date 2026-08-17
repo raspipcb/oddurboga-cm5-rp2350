@@ -3,7 +3,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 VENV="$ROOT/.venv"
 
-echo "==> HÚSVIT PyQt — dev setup"
+echo "==> HÚSVIT PyQt - dev setup"
 python3 -m venv "$VENV"
 source "$VENV/bin/activate"
 pip install --upgrade pip

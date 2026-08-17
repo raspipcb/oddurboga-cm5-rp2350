@@ -1,4 +1,4 @@
-"""Home screen — temperature control and quick actions."""
+"""Home screen - temperature control and quick actions."""
 
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtGui import QFont, QIcon

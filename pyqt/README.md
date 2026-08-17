@@ -1,4 +1,4 @@
-# IPSs — PyQt5 Hardware UI
+# IPSs - PyQt5 Hardware UI
 
 Touchscreen UI for the IPS hot-tub controller, built with Python + PyQt5.  
 Target hardware: Raspberry Pi + 800×480 or 1024×600 capacitive touch display.
@@ -14,7 +14,7 @@ The UI scales for **800×480** (default) and **1024×600**:
 ./scripts/run.sh --fullscreen --size 800x480
 ```
 
-On Pi with a 1024×600 panel, use `./scripts/run.sh --fullscreen` — it picks the matching preset automatically.
+On Pi with a 1024×600 panel, use `./scripts/run.sh --fullscreen` - it picks the matching preset automatically.
 
 ## Screens
 
@@ -69,7 +69,7 @@ cd hardware-ui/pyqt
 ./scripts/run.sh --fullscreen
 ```
 
-On Raspberry Pi OS with a desktop session, PyQt5 uses the normal X11/Wayland display — no framebuffer drivers needed.
+On Raspberry Pi OS with a desktop session, PyQt5 uses the normal X11/Wayland display - no framebuffer drivers needed.
 
 ### Autostart on boot
 
@@ -78,7 +78,7 @@ Add to `~/.config/autostart/husvit.desktop`:
 ```ini
 [Desktop Entry]
 Type=Application
-Name=HÚSVIT
+Name=IPS
 Exec=/home/pi/housesit/hardware-ui/pyqt/scripts/run.sh --fullscreen
 X-GNOME-Autostart-enabled=true
 ```

@@ -92,7 +92,7 @@ CARD_PAD_X = 14
 CARD_PAD_Y = 12
 CARD_GAP = 10
 
-# Color tokens — updated by apply_palette()
+# Color tokens - updated by apply_palette()
 C_BG = LIGHT["C_BG"]
 C_SURFACE = LIGHT["C_SURFACE"]
 C_TILE = LIGHT["C_TILE"]
@@ -214,7 +214,7 @@ def configure_screen(width: int, height: int) -> None:
     H = height
 
     if width >= 1024 and height >= 600:
-        # Extra pixels become layout space — don't scale widgets up 1.25×
+        # Extra pixels become layout space - don't scale widgets up 1.25×
         SCALE = 1.0
         MARGIN = 14
         GAP = 12

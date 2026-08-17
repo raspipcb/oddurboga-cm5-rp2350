@@ -1,4 +1,4 @@
-"""Lightweight translations — English default, Icelandic optional."""
+"""Lightweight translations - English default, Icelandic optional."""
 
 from PyQt5.QtCore import QObject, pyqtSignal
 

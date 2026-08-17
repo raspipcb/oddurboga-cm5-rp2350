@@ -3,7 +3,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 VENV="$ROOT/.venv"
 
-echo "==> HÚSVIT PyQt — Raspberry Pi setup"
+echo "==> HÚSVIT PyQt - Raspberry Pi setup"
 sudo apt-get update -qq
 sudo apt-get install -y python3-venv python3-pyqt5 || true
 

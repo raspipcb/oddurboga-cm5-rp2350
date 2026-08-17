@@ -1,5 +1,5 @@
 """
-HÚSVIT — PyQt5 touchscreen UI for Raspberry Pi.
+HÚSVIT - PyQt5 touchscreen UI for Raspberry Pi.
 
 Supported displays: 800×480, 1024×600
 

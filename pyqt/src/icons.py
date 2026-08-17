@@ -1,4 +1,4 @@
-"""UI icons — SVG assets where available, QPainter fallback otherwise."""
+"""UI icons - SVG assets where available, QPainter fallback otherwise."""
 
 from __future__ import annotations
 

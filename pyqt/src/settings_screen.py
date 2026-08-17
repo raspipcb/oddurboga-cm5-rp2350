@@ -1,4 +1,4 @@
-"""Settings screen — thresholds, sensors, device info."""
+"""Settings screen - thresholds, sensors, device info."""
 
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtWidgets import QFrame, QHBoxLayout, QVBoxLayout, QWidget
@@ -84,7 +84,7 @@ class SettingsScreen(QWidget):
         about_body = about_card.body()
         self.about_section = SectionTitle("")
         about_body.addWidget(self.about_section)
-        device = self.state.get("device_name", "—")
+        device = self.state.get("device_name", "-")
         max_len = s(28)
         device_text = device if len(device) < max_len else device[: max_len - 1] + "…"
         self.software_row = InfoRow("", self.state.get("software_ver", "Version 3"))
