@@ -19,17 +19,21 @@ from theme import (
 )
 from ui_common import Card, FieldLabel, HeaderBar, NavBar, SegmentedControl, StepButton
 
-class ActionButton(QFrame):
-    clicked = pyqtSignal()
-
+class ActionButton(QPushButton):
     def __init__(self, title_key, subtitle_key, icon, active=False, parent=None):
         super().__init__(parent)
         self._title_key = title_key
         self._subtitle_key = subtitle_key
         self._icon = icon
         self._active = active
-        self._pressed = False
+        self.setObjectName("actionButton")
         self.setCursor(Qt.PointingHandCursor)
+        self.setFlat(True)
+        self.setFocusPolicy(Qt.NoFocus)
+        self.setAutoDefault(False)
+        self.setDefault(False)
+        self.setAttribute(Qt.WA_StyledBackground, True)
+        self.setAutoFillBackground(True)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.setMinimumHeight(ACTION_MIN_H)
 
@@ -40,14 +44,17 @@ class ActionButton(QFrame):
 
         self.icon_lbl = QLabel()
         self.icon_lbl.setAlignment(Qt.AlignCenter)
+        self.icon_lbl.setAttribute(Qt.WA_TransparentForMouseEvents)
         layout.addWidget(self.icon_lbl, 0, Qt.AlignHCenter)
 
         self.title_lbl = QLabel()
         self.title_lbl.setAlignment(Qt.AlignCenter)
         self.title_lbl.setFont(QFont("", s(15), QFont.DemiBold))
+        self.title_lbl.setAttribute(Qt.WA_TransparentForMouseEvents)
         self.sub_lbl = QLabel()
         self.sub_lbl.setAlignment(Qt.AlignCenter)
         self.sub_lbl.setWordWrap(True)
+        self.sub_lbl.setAttribute(Qt.WA_TransparentForMouseEvents)
         layout.addWidget(self.title_lbl)
         layout.addWidget(self.sub_lbl)
         self.retranslate()
@@ -60,15 +67,14 @@ class ActionButton(QFrame):
         )
 
     def _apply_tile_style(self):
-        if self._pressed:
-            bg = theme.C_PRESS_CYAN
-        else:
-            bg = theme.C_SURFACE
         self.setStyleSheet(f"""
-            QFrame {{
-                background: {bg};
+            QPushButton#actionButton {{
+                background: {theme.C_SURFACE};
                 border: none;
                 border-radius: {RADIUS_SM}px;
+            }}
+            QPushButton#actionButton:pressed {{
+                background: {theme.C_PRESS_CYAN};
             }}
         """)
 
@@ -83,17 +89,6 @@ class ActionButton(QFrame):
             f"color: {theme.C_TEXT_MUTED if not self._active else theme.C_ACCENT_TEXT}; {fs(11)} {transparent_bg()}"
         )
         self._apply_tile_style()
-
-    def mousePressEvent(self, event):
-        self._pressed = True
-        self._apply_tile_style()
-        self.clicked.emit()
-        super().mousePressEvent(event)
-
-    def mouseReleaseEvent(self, event):
-        self._pressed = False
-        self._apply_tile_style()
-        super().mouseReleaseEvent(event)
 
     def restyle(self):
         self.retranslate()

@@ -108,7 +108,11 @@ def main():
     )
     args = parser.parse_args()
 
-    QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
+    if on_pi():
+        # HiDPI scaling can mis-map touch coordinates on embedded displays.
+        QApplication.setAttribute(Qt.AA_DisableHighDpiScaling, True)
+    else:
+        QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
 
