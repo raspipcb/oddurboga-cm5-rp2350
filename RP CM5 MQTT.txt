@@ -1,0 +1,1025 @@
+#include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
+#include <stdbool.h>
+#include <stdarg.h>
+
+#include "pico/stdlib.h"
+#include "hardware/uart.h"
+
+/* =========================================================
+   UART CONFIG
+   ========================================================= */
+
+#define UART_ID         uart0
+#define BAUD_RATE       115200
+
+#define UART_TX_PIN     0
+#define UART_RX_PIN     1
+
+#define RX_BUFFER_SIZE  160
+
+#define FW_VERSION      "1.0.0"
+
+/* =========================================================
+   SYSTEM STATE
+   ========================================================= */
+
+typedef enum
+{
+    MODE_AUTO,
+    MODE_OFF,
+    MODE_COLD
+} system_mode_t;
+
+typedef enum
+{
+    DRAIN_OPEN,
+    DRAIN_CLOSED
+} drain_state_t;
+
+typedef enum
+{
+    HEAT_CABLE_AUTO,
+    HEAT_CABLE_ON,
+    HEAT_CABLE_OFF
+} heat_cable_mode_t;
+
+
+/* Configuration */
+static float target_temp = 39.0f;
+static float inlet_offset = 3.0f;
+static float reheat_hyst = 2.0f;
+static float tub_cal = 0.0f;
+
+static int frost_delay = 120;
+
+static system_mode_t system_mode = MODE_OFF;
+static drain_state_t drain_state = DRAIN_CLOSED;
+static heat_cable_mode_t heat_cable_mode = HEAT_CABLE_AUTO;
+
+
+/* Current operating states */
+static bool flow_on = false;
+static bool aux_on = false;
+static bool frost_active = false;
+
+
+/* =========================================================
+   TEMP VALUES
+   Temporary test values
+   ========================================================= */
+
+static float temp1_raw = 38.5f;
+static float temp2_inlet = 42.0f;
+
+
+/* =========================================================
+   FAULT
+   ========================================================= */
+
+static char active_fault[32] = "NONE";
+
+
+/* =========================================================
+   HELPER FUNCTIONS
+   ========================================================= */
+
+static float get_tub_temperature(void)
+{
+    return temp1_raw + tub_cal;
+}
+
+
+static float get_inlet_temperature(void)
+{
+    return temp2_inlet;
+}
+
+
+static const char *get_mode_string(void)
+{
+    switch (system_mode)
+    {
+        case MODE_AUTO:
+            return "AUTO";
+
+        case MODE_COLD:
+            return "COLD";
+
+        case MODE_OFF:
+        default:
+            return "OFF";
+    }
+}
+
+
+static const char *get_drain_string(void)
+{
+    if (drain_state == DRAIN_OPEN)
+        return "OPEN";
+
+    return "CLOSED";
+}
+
+
+static const char *get_heat_cable_string(void)
+{
+    switch (heat_cable_mode)
+    {
+        case HEAT_CABLE_ON:
+            return "ON";
+
+        case HEAT_CABLE_OFF:
+            return "OFF";
+
+        case HEAT_CABLE_AUTO:
+        default:
+            return "AUTO";
+    }
+}
+
+
+/* =========================================================
+   SEND REPLY
+   Sends to CM5 UART + USB debug
+   ========================================================= */
+
+static void send_reply(const char *reply)
+{
+    /* Send to CM5 */
+    uart_puts(UART_ID, reply);
+    uart_puts(UART_ID, "\n");
+
+    /* Show on USB / PuTTY */
+    printf("Reply: %s\r\n", reply);
+}
+
+
+static void send_replyf(const char *format, ...)
+{
+    char buffer[256];
+
+    va_list args;
+
+    va_start(args, format);
+
+    vsnprintf(
+        buffer,
+        sizeof(buffer),
+        format,
+        args
+    );
+
+    va_end(args);
+
+    send_reply(buffer);
+}
+
+
+/* =========================================================
+   LOCAL SAFETY
+   ========================================================= */
+
+static void update_local_safety(void)
+{
+    /*
+       If inlet temperature exceeds 49.9 C,
+       stop flow locally.
+    */
+
+    if (get_inlet_temperature() > 49.9f)
+    {
+        flow_on = false;
+
+        strcpy(
+            active_fault,
+            "INLET_OVERTEMP"
+        );
+
+        /*
+           TODO later:
+           close hot valve
+           close cold valve
+           disable flow outputs
+        */
+    }
+}
+
+
+/* =========================================================
+   COMMAND PROCESSOR
+   ========================================================= */
+
+static void process_command(char *command)
+{
+    float value;
+    int int_value;
+
+    printf(
+        "\r\nReceived: %s\r\n",
+        command
+    );
+
+
+    /* =====================================================
+       PING
+       ===================================================== */
+
+    if (strcmp(command, "PING") == 0)
+    {
+        send_reply("OK");
+        return;
+    }
+
+
+    /* =====================================================
+       SET_TARGET_TEMP
+       ===================================================== */
+
+    if (sscanf(
+            command,
+            "SET_TARGET_TEMP %f",
+            &value
+        ) == 1)
+    {
+        target_temp = value;
+
+        send_reply("OK");
+        return;
+    }
+
+
+    /* =====================================================
+       GET_TARGET_TEMP
+       ===================================================== */
+
+    if (strcmp(
+            command,
+            "GET_TARGET_TEMP"
+        ) == 0)
+    {
+        send_replyf(
+            "VALUE %.1f",
+            target_temp
+        );
+
+        return;
+    }
+
+
+    /* =====================================================
+       GET_TUB_TEMP
+       ===================================================== */
+
+    if (strcmp(
+            command,
+            "GET_TUB_TEMP"
+        ) == 0)
+    {
+        send_replyf(
+            "VALUE %.1f",
+            get_tub_temperature()
+        );
+
+        return;
+    }
+
+
+    /* =====================================================
+       GET_INLET_TEMP
+       ===================================================== */
+
+    if (strcmp(
+            command,
+            "GET_INLET_TEMP"
+        ) == 0)
+    {
+        send_replyf(
+            "VALUE %.1f",
+            get_inlet_temperature()
+        );
+
+        return;
+    }
+
+
+    /* =====================================================
+       SET_INLET_OFFSET
+       Allowed: 1 - 5 C
+       ===================================================== */
+
+    if (sscanf(
+            command,
+            "SET_INLET_OFFSET %f",
+            &value
+        ) == 1)
+    {
+        if (
+            value < 1.0f ||
+            value > 5.0f
+        )
+        {
+            send_reply(
+                "ERROR INVALID_VALUE"
+            );
+
+            return;
+        }
+
+        inlet_offset = value;
+
+        send_reply("OK");
+        return;
+    }
+
+
+    /* =====================================================
+       SET_REHEAT_HYST
+       Allowed: 1 - 5 C
+       ===================================================== */
+
+    if (sscanf(
+            command,
+            "SET_REHEAT_HYST %f",
+            &value
+        ) == 1)
+    {
+        if (
+            value < 1.0f ||
+            value > 5.0f
+        )
+        {
+            send_reply(
+                "ERROR INVALID_VALUE"
+            );
+
+            return;
+        }
+
+        reheat_hyst = value;
+
+        send_reply("OK");
+        return;
+    }
+
+
+    /* =====================================================
+       SET_TUB_CAL
+       Allowed: -10 to +10 C
+       ===================================================== */
+
+    if (sscanf(
+            command,
+            "SET_TUB_CAL %f",
+            &value
+        ) == 1)
+    {
+        if (
+            value < -10.0f ||
+            value > 10.0f
+        )
+        {
+            send_reply(
+                "ERROR INVALID_VALUE"
+            );
+
+            return;
+        }
+
+        tub_cal = value;
+
+        send_reply("OK");
+        return;
+    }
+
+
+    /* =====================================================
+       SET_MODE
+       ===================================================== */
+
+    if (strcmp(
+            command,
+            "SET_MODE AUTO"
+        ) == 0)
+    {
+        system_mode = MODE_AUTO;
+
+        send_reply("OK");
+        return;
+    }
+
+
+    if (strcmp(
+            command,
+            "SET_MODE OFF"
+        ) == 0)
+    {
+        system_mode = MODE_OFF;
+
+        send_reply("OK");
+        return;
+    }
+
+
+    if (strcmp(
+            command,
+            "SET_MODE COLD"
+        ) == 0)
+    {
+        system_mode = MODE_COLD;
+
+        send_reply("OK");
+        return;
+    }
+
+
+    if (strncmp(
+            command,
+            "SET_MODE ",
+            9
+        ) == 0)
+    {
+        send_reply(
+            "ERROR INVALID_VALUE"
+        );
+
+        return;
+    }
+
+
+    /* =====================================================
+       START_FLOW
+       ===================================================== */
+
+    if (strcmp(
+            command,
+            "START_FLOW"
+        ) == 0)
+    {
+        update_local_safety();
+
+        if (
+            strcmp(
+                active_fault,
+                "NONE"
+            ) != 0
+        )
+        {
+            send_reply(
+                "ERROR SAFETY_LOCK"
+            );
+
+            return;
+        }
+
+        flow_on = true;
+
+        send_reply("OK");
+        return;
+    }
+
+
+    /* =====================================================
+       STOP_FLOW
+       ===================================================== */
+
+    if (strcmp(
+            command,
+            "STOP_FLOW"
+        ) == 0)
+    {
+        flow_on = false;
+
+        send_reply("OK");
+        return;
+    }
+
+
+    /* =====================================================
+       SET_DRAIN
+       ===================================================== */
+
+    if (strcmp(
+            command,
+            "SET_DRAIN OPEN"
+        ) == 0)
+    {
+        drain_state = DRAIN_OPEN;
+
+        send_reply("OK");
+        return;
+    }
+
+
+    if (strcmp(
+            command,
+            "SET_DRAIN CLOSE"
+        ) == 0)
+    {
+        /*
+           Later:
+           if frost active,
+           run thaw sequence first.
+        */
+
+        drain_state = DRAIN_CLOSED;
+
+        send_reply("OK");
+        return;
+    }
+
+
+    if (strncmp(
+            command,
+            "SET_DRAIN ",
+            10
+        ) == 0)
+    {
+        send_reply(
+            "ERROR INVALID_VALUE"
+        );
+
+        return;
+    }
+
+
+    /* =====================================================
+       SET_FROST_DELAY
+       ===================================================== */
+
+    if (sscanf(
+            command,
+            "SET_FROST_DELAY %d",
+            &int_value
+        ) == 1)
+    {
+        if (int_value < 0)
+        {
+            send_reply(
+                "ERROR INVALID_VALUE"
+            );
+
+            return;
+        }
+
+        frost_delay = int_value;
+
+        send_reply("OK");
+        return;
+    }
+
+
+    /* =====================================================
+       SET_HEAT_CABLE
+       ===================================================== */
+
+    if (strcmp(
+            command,
+            "SET_HEAT_CABLE AUTO"
+        ) == 0)
+    {
+        heat_cable_mode =
+            HEAT_CABLE_AUTO;
+
+        send_reply("OK");
+        return;
+    }
+
+
+    if (strcmp(
+            command,
+            "SET_HEAT_CABLE ON"
+        ) == 0)
+    {
+        heat_cable_mode =
+            HEAT_CABLE_ON;
+
+        send_reply("OK");
+        return;
+    }
+
+
+    if (strcmp(
+            command,
+            "SET_HEAT_CABLE OFF"
+        ) == 0)
+    {
+        heat_cable_mode =
+            HEAT_CABLE_OFF;
+
+        send_reply("OK");
+        return;
+    }
+
+
+    if (strncmp(
+            command,
+            "SET_HEAT_CABLE ",
+            15
+        ) == 0)
+    {
+        send_reply(
+            "ERROR INVALID_VALUE"
+        );
+
+        return;
+    }
+
+
+    /* =====================================================
+       SET_AUX
+       ===================================================== */
+
+    if (strcmp(
+            command,
+            "SET_AUX ON"
+        ) == 0)
+    {
+        aux_on = true;
+
+        send_reply("OK");
+        return;
+    }
+
+
+    if (strcmp(
+            command,
+            "SET_AUX OFF"
+        ) == 0)
+    {
+        aux_on = false;
+
+        send_reply("OK");
+        return;
+    }
+
+
+    if (strncmp(
+            command,
+            "SET_AUX ",
+            8
+        ) == 0)
+    {
+        send_reply(
+            "ERROR INVALID_VALUE"
+        );
+
+        return;
+    }
+
+
+    /* =====================================================
+       SET_FROST_ACTIVE
+       ===================================================== */
+
+    if (sscanf(
+            command,
+            "SET_FROST_ACTIVE %d",
+            &int_value
+        ) == 1)
+    {
+        if (
+            int_value != 0 &&
+            int_value != 1
+        )
+        {
+            send_reply(
+                "ERROR INVALID_VALUE"
+            );
+
+            return;
+        }
+
+        frost_active =
+            (int_value == 1);
+
+        send_reply("OK");
+        return;
+    }
+
+
+    /* =====================================================
+       GET_STATUS
+       ===================================================== */
+
+    if (strcmp(
+            command,
+            "GET_STATUS"
+        ) == 0)
+    {
+        const char *mix_state;
+
+        if (!flow_on)
+        {
+            mix_state = "IDLE";
+        }
+        else if (
+            get_inlet_temperature() <
+            (target_temp + inlet_offset)
+        )
+        {
+            mix_state = "HEATING";
+        }
+        else
+        {
+            mix_state = "HOLD";
+        }
+
+
+        send_replyf(
+            "STATUS "
+            "MODE=%s "
+            "TARGET=%.1f "
+            "TUB=%.1f "
+            "INLET=%.1f "
+            "FLOW=%s "
+            "DRAIN=%s "
+            "MIX=%s "
+            "HEAT_CABLE=%s "
+            "AUX=%s "
+            "SAFETY=%s "
+            "FAULT=%s",
+
+            get_mode_string(),
+
+            target_temp,
+
+            get_tub_temperature(),
+
+            get_inlet_temperature(),
+
+            flow_on ?
+                "ON" :
+                "OFF",
+
+            get_drain_string(),
+
+            mix_state,
+
+            get_heat_cable_string(),
+
+            aux_on ?
+                "ON" :
+                "OFF",
+
+            strcmp(
+                active_fault,
+                "NONE"
+            ) == 0 ?
+                "OK" :
+                "LOCK",
+
+            active_fault
+        );
+
+        return;
+    }
+
+
+    /* =====================================================
+       GET_FAULT
+       ===================================================== */
+
+    if (strcmp(
+            command,
+            "GET_FAULT"
+        ) == 0)
+    {
+        send_replyf(
+            "VALUE %s",
+            active_fault
+        );
+
+        return;
+    }
+
+
+    /* =====================================================
+       CLEAR_FAULT
+       ===================================================== */
+
+    if (strcmp(
+            command,
+            "CLEAR_FAULT"
+        ) == 0)
+    {
+        if (
+            get_inlet_temperature() >
+            49.9f
+        )
+        {
+            send_reply(
+                "ERROR SAFETY_LOCK"
+            );
+
+            return;
+        }
+
+        strcpy(
+            active_fault,
+            "NONE"
+        );
+
+        send_reply("OK");
+        return;
+    }
+
+
+    /* =====================================================
+       GET_SYSTEM_INFO
+       ===================================================== */
+
+    if (strcmp(
+            command,
+            "GET_SYSTEM_INFO"
+        ) == 0)
+    {
+        send_replyf(
+            "INFO FW=%s STATE=READY",
+            FW_VERSION
+        );
+
+        return;
+    }
+
+
+    /* =====================================================
+       UNKNOWN COMMAND
+       ===================================================== */
+
+    send_reply(
+        "ERROR INVALID_CMD"
+    );
+}
+
+
+/* =========================================================
+   MAIN
+   ========================================================= */
+
+int main(void)
+{
+    stdio_init_all();
+
+
+    /* UART0 INIT */
+    uart_init(
+        UART_ID,
+        BAUD_RATE
+    );
+
+
+    gpio_set_function(
+        UART_TX_PIN,
+        GPIO_FUNC_UART
+    );
+
+
+    gpio_set_function(
+        UART_RX_PIN,
+        GPIO_FUNC_UART
+    );
+
+
+    uart_set_format(
+        UART_ID,
+        8,
+        1,
+        UART_PARITY_NONE
+    );
+
+
+    uart_set_hw_flow(
+        UART_ID,
+        false,
+        false
+    );
+
+
+    uart_set_fifo_enabled(
+        UART_ID,
+        true
+    );
+
+
+    /* Allow USB CDC to enumerate */
+    sleep_ms(3000);
+
+
+    /* Clear any garbage already in RX FIFO */
+    while (
+        uart_is_readable(UART_ID)
+    )
+    {
+        uart_getc(UART_ID);
+    }
+
+
+    printf("\r\n");
+    printf(
+        "RP2350 COMMAND CONTROLLER\r\n"
+    );
+
+    printf(
+        "Firmware: %s\r\n",
+        FW_VERSION
+    );
+
+    printf(
+        "UART0: GPIO0 TX / GPIO1 RX\r\n"
+    );
+
+    printf(
+        "Baud: 115200\r\n"
+    );
+
+    printf(
+        "Waiting for CM5 commands...\r\n"
+    );
+
+
+    char rx_buffer[
+        RX_BUFFER_SIZE
+    ];
+
+    int rx_index = 0;
+
+
+    while (true)
+    {
+        /*
+           Local safety always runs,
+           independent of CM5.
+        */
+        update_local_safety();
+
+
+        /* =============================================
+           UART RX
+           ============================================= */
+
+        while (
+            uart_is_readable(UART_ID)
+        )
+        {
+            unsigned char c =
+                uart_getc(UART_ID);
+
+
+            /* End of command */
+            if (
+                c == '\r' ||
+                c == '\n'
+            )
+            {
+                if (rx_index > 0)
+                {
+                    rx_buffer[
+                        rx_index
+                    ] = '\0';
+
+
+                    process_command(
+                        rx_buffer
+                    );
+
+
+                    rx_index = 0;
+                }
+            }
+
+
+            /*
+               Accept printable ASCII only.
+               Ignore garbage / control bytes.
+            */
+            else if (
+                c >= 32 &&
+                c <= 126
+            )
+            {
+                if (
+                    rx_index <
+                    RX_BUFFER_SIZE - 1
+                )
+                {
+                    rx_buffer[
+                        rx_index++
+                    ] = (char)c;
+                }
+                else
+                {
+                    rx_index = 0;
+
+                    send_reply(
+                        "ERROR INVALID_CMD"
+                    );
+                }
+            }
+        }
+
+
+        tight_loop_contents();
+    }
+}
