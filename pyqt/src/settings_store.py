@@ -16,7 +16,7 @@ PERSISTED_KEYS = frozenset({
 
 DEFAULTS = {
     "set_temp": 36,
-    "threshold": 0,
+    "threshold": 2,
     "extra_heat": 3,
     "flow_mode": 1,
 }

@@ -487,6 +487,7 @@ class LabeledSlider(QWidget):
     def __init__(self, lo, hi, value, label="", suffix="°C", large_value=False, parent=None):
         super().__init__(parent)
         self._large_value = large_value
+        self._suppress = False
         self.setStyleSheet(transparent_bg())
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -515,9 +516,20 @@ class LabeledSlider(QWidget):
     def set_label(self, text: str):
         self.field_lbl.setText(text)
 
+    def set_value(self, value, silent=True):
+        """Reflect a value from the controller without echoing a command back."""
+        self._suppress = silent
+        try:
+            self.slider.setValue(int(round(float(value))))
+        except (TypeError, ValueError):
+            pass
+        finally:
+            self._suppress = False
+
     def _on_change(self, value):
         self.value_lbl.setText(f"{value}{self._suffix}")
-        self.value_changed.emit(value)
+        if not self._suppress:
+            self.value_changed.emit(value)
 
     def restyle(self):
         self.field_lbl.setStyleSheet(field_label_style())

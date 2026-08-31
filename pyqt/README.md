@@ -93,6 +93,87 @@ The choice is saved to `config.json` in the project root and restored on next la
 
 Supported languages: `en`, `is`
 
+## Controller link (CM_UART0 -> RP2350)
+
+The UI talks to the RP2350 over the cross-connected UART using the command set in
+[`CM5 RPI Commands in MD format.md`](../CM5%20RPI%20Commands%20in%20MD%20format.md).
+
+```bash
+./scripts/run.sh --port /dev/serial0    # explicit port
+./scripts/run.sh --baud 115200          # link speed
+./scripts/run.sh --mock                 # built-in controller simulator
+./scripts/run.sh --poll 2.0             # GET_STATUS interval, seconds
+```
+
+`IPS_PORT` and `IPS_BAUD` work as environment variables too. With no port given,
+Linux defaults to `/dev/serial0`; if that device is absent (or on Windows/macOS)
+the UI runs against the simulator so development needs no hardware.
+
+### Transport assumptions
+
+The API document defines syntax but not framing, so the client uses these
+defaults. **Firmware must match them:**
+
+| Setting | Value |
+| ------- | ----- |
+| Baud | 115200, 8N1, no flow control |
+| Request terminator | `\n` (`\r\n` also accepted on replies) |
+| Encoding | ASCII |
+| Response timeout | 1.0 s per request |
+| Model | One request, one reply line; no unsolicited traffic expected |
+
+Unsolicited or unparseable lines are logged and discarded. After 20 of them in a
+single exchange, or 3 consecutive failed requests, the link cycles the port.
+
+### Modules
+
+| File | Role |
+| ---- | ---- |
+| `src/protocol.py` | Command building and tolerant reply parsing (no I/O) |
+| `src/device_link.py` | Worker thread, timeouts, reconnect, request queue, simulator |
+| `src/toast.py` | On-screen result notifications |
+| `src/api_log.py` | Rotating API log at `pyqt/logs/api.log` |
+
+Every request and reply is logged with elapsed time:
+
+```text
+-> SET_TARGET_TEMP 39.0
+<- OK (12 ms)
+!! GET_STATUS timeout after 1000 ms
+```
+
+### UI to command mapping
+
+The four home tiles are independent toggles. The background shows whether the
+feature is on, the title says what the next tap will do, and the state is
+reconciled from `GET_STATUS` - not from the last tap - so the screen follows the
+controller even if something else changes it. The flow tile also swaps its glyph
+with the title: a play triangle while stopped, a stop square while running.
+
+| Tile | Tap while off | Tap while on | On when |
+| ---- | ------------- | ------------ | ------- |
+| Turn on / Turn off | `SET_MODE AUTO` | `SET_MODE OFF` | `MODE != OFF` |
+| Start / Stop | `START_FLOW` | `STOP_FLOW` | `FLOW = ON` |
+| Drain / Close drain | `SET_DRAIN OPEN` | `SET_DRAIN CLOSE` | `DRAIN = OPEN` |
+| Cold / Auto | `SET_MODE COLD` | `SET_MODE AUTO` | `MODE = COLD` |
+
+`Turn on` and `Cold` both drive `MODE`, so in cold mode both tiles read as on.
+A command the controller refuses (for example `SAFETY_LOCK`) reverts its tile.
+
+| Other control | Command |
+| ------------- | ------- |
+| Set-temperature slider | `SET_TARGET_TEMP` (debounced 350 ms) |
+| Turn-on threshold | `SET_REHEAT_HYST` (1-5 °C) |
+| Extra heat | `SET_INLET_OFFSET` (1-5 °C) |
+| Status poll | `GET_STATUS` -> temperatures, tile states |
+
+Run the test suites with:
+
+```bash
+.venv/bin/python tests/test_device_link.py    # link robustness
+.venv/bin/python tests/test_home_actions.py   # action tile behaviour
+```
+
 ## Application state
 
 `APP_STATE` in `main.py` is passed to both screens. Replace static values with live sensor/MQTT reads:

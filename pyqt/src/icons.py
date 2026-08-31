@@ -14,7 +14,7 @@ ASSETS_DIR = Path(__file__).resolve().parent / "assets" / "icons"
 
 # Action icons shipped as SVG vector assets
 SVG_ICONS = frozenset({
-    "power", "pause", "stop", "cold", "down", "drop",
+    "power", "pause", "play", "stop", "cold", "down", "drop",
     "home", "settings", "refresh", "plus", "minus", "wifi",
     "sun", "cloud", "rain", "moon",
 })

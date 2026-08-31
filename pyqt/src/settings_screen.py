@@ -4,6 +4,7 @@ from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtWidgets import QFrame, QHBoxLayout, QVBoxLayout, QWidget
 
 from i18n import tr
+from protocol import LIMITS, parse_number
 import theme
 from settings_store import save_persisted
 from theme import GAP, MARGIN, s
@@ -13,13 +14,19 @@ from ui_common import (
 )
 
 
+def _clamped(value, lo, hi):
+    number = parse_number(value, lo)
+    return int(round(min(hi, max(lo, number))))
+
+
 class SettingsScreen(QWidget):
     navigate_home = pyqtSignal()
     wifi_reset = pyqtSignal()
 
-    def __init__(self, state=None, parent=None):
+    def __init__(self, state=None, link=None, parent=None):
         super().__init__(parent)
         self.state = state or {}
+        self.link = link
         self.setStyleSheet(f"background: {theme.C_BG};")
         self._build()
 
@@ -54,11 +61,23 @@ class SettingsScreen(QWidget):
         self.temp_section = SectionTitle("")
         temp_body.addWidget(self.temp_section)
 
-        self.threshold = LabeledSlider(-10, 30, self.state.get("threshold", 0), large_value=True)
+        # Ranges follow the controller's documented limits so the UI cannot
+        # produce an ERROR INVALID_VALUE.
+        hyst_lo, hyst_hi = LIMITS["SET_REHEAT_HYST"]
+        self.threshold = LabeledSlider(
+            int(hyst_lo), int(hyst_hi),
+            _clamped(self.state.get("threshold", 2), hyst_lo, hyst_hi),
+            large_value=True,
+        )
         self.threshold.value_changed.connect(self._on_threshold)
         temp_body.addWidget(self.threshold)
 
-        self.extra = LabeledSlider(0, 20, self.state.get("extra_heat", 3), large_value=True)
+        offset_lo, offset_hi = LIMITS["SET_INLET_OFFSET"]
+        self.extra = LabeledSlider(
+            int(offset_lo), int(offset_hi),
+            _clamped(self.state.get("extra_heat", 3), offset_lo, offset_hi),
+            large_value=True,
+        )
         self.extra.value_changed.connect(self._on_extra_heat)
         temp_body.addWidget(self.extra)
         col.addWidget(temp_card)
@@ -145,13 +164,42 @@ class SettingsScreen(QWidget):
 
         self.nav.retranslate()
 
+    def set_link_status(self, text, ok=None):
+        self.header.set_status(text[:16], ok)
+
+    def apply_status(self, fields):
+        """Reflect one GET_STATUS reply onto the sensor readouts."""
+        status = fields or {}
+        tub = parse_number(status.get("TUB"))
+        if tub is not None:
+            self.pot_card.set_value(f"{tub:.1f} °C")
+        inlet = parse_number(status.get("INLET"))
+        if inlet is not None:
+            self.control_card.set_value(f"{inlet:.1f} °C")
+
+    def apply_info(self, fields):
+        """Reflect one GET_SYSTEM_INFO reply onto the about card."""
+        version = (fields or {}).get("FW")
+        if version:
+            self.software_row.set_value(str(version))
+
     def _on_threshold(self, value):
         self.state["threshold"] = value
         save_persisted(threshold=value)
+        if self.link is not None:
+            self.link.send(
+                "SET_REHEAT_HYST", float(value),
+                label_key="api.reheat_hyst", coalesce="SET_REHEAT_HYST",
+            )
 
     def _on_extra_heat(self, value):
         self.state["extra_heat"] = value
         save_persisted(extra_heat=value)
+        if self.link is not None:
+            self.link.send(
+                "SET_INLET_OFFSET", float(value),
+                label_key="api.inlet_offset", coalesce="SET_INLET_OFFSET",
+            )
 
     def restyle(self):
         self.setStyleSheet(f"background: {theme.C_BG};")

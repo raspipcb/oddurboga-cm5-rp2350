@@ -1,14 +1,17 @@
 """Home screen - temperature control and quick actions."""
 
-from PyQt5.QtCore import Qt, pyqtSignal
+from dataclasses import dataclass
+
+from PyQt5.QtCore import Qt, QTimer, pyqtSignal
 from PyQt5.QtGui import QFont, QIcon
 from PyQt5.QtWidgets import (
-    QFrame, QGridLayout, QHBoxLayout, QLabel, QPushButton, QSlider, QSizePolicy,
-    QVBoxLayout, QWidget,
+    QFrame, QGridLayout, QHBoxLayout, QLabel, QPushButton, QSlider,
+    QSizePolicy, QVBoxLayout, QWidget,
 )
 
 from i18n import tr
 from icons import icon_pixmap
+from protocol import parse_number
 import theme
 from settings_store import save_persisted
 from theme import (
@@ -19,19 +22,43 @@ from theme import (
 )
 from ui_common import Card, FieldLabel, HeaderBar, NavBar, SegmentedControl, StepButton
 
+@dataclass(frozen=True)
+class ActionFace:
+    """What a tile shows in one state, and what a tap from that state sends."""
+
+    title_key: str
+    sub_key: str
+    label_key: str
+    command: str
+    param: object = None
+    icon: str = ""  # overrides the tile icon when the two states differ
+
+
+@dataclass(frozen=True)
+class ActionSpec:
+    """A tile's two states. `off` engages the feature, `on` releases it."""
+
+    key: str
+    icon: str
+    off: ActionFace
+    on: ActionFace
+
+
 class ActionButton(QPushButton):
-    def __init__(self, title_key, subtitle_key, icon, active=False, parent=None):
+    """Two-state tile: the background shows the current state of the feature,
+    the title says what the next tap will do."""
+
+    def __init__(self, spec: ActionSpec, active=False, parent=None):
         super().__init__(parent)
-        self._title_key = title_key
-        self._subtitle_key = subtitle_key
-        self._icon = icon
-        self._active = active
+        self._spec = spec
         self.setObjectName("actionButton")
         self.setCursor(Qt.PointingHandCursor)
         self.setFlat(True)
         self.setFocusPolicy(Qt.NoFocus)
         self.setAutoDefault(False)
         self.setDefault(False)
+        self.setCheckable(True)
+        self.setChecked(active)
         self.setAttribute(Qt.WA_StyledBackground, True)
         self.setAutoFillBackground(True)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
@@ -57,37 +84,59 @@ class ActionButton(QPushButton):
         self.sub_lbl.setAttribute(Qt.WA_TransparentForMouseEvents)
         layout.addWidget(self.title_lbl)
         layout.addWidget(self.sub_lbl)
+        self.toggled.connect(lambda _: self.retranslate())
         self.retranslate()
         self._apply_tile_style()
 
+    @property
+    def spec(self) -> ActionSpec:
+        return self._spec
+
+    def face(self, engaged=None) -> ActionFace:
+        """The face for a given state, defaulting to the tile's current one."""
+        if engaged is None:
+            engaged = self.isChecked()
+        return self._spec.on if engaged else self._spec.off
+
     def _update_icon(self):
         icon_size = s(52)
+        bg = theme.C_ACCENT if self.isChecked() else theme.C_ICON_BG
         self.icon_lbl.setPixmap(
-            icon_pixmap(self._icon, icon_size, fg="#FFFFFF", bg=theme.C_ICON_BG)
+            icon_pixmap(self.face().icon or self._spec.icon, icon_size,
+                        fg="#FFFFFF", bg=bg)
         )
 
     def _apply_tile_style(self):
+        # :pressed comes last so a touch always flashes, checked or not.
         self.setStyleSheet(f"""
             QPushButton#actionButton {{
                 background: {theme.C_SURFACE};
                 border: none;
                 border-radius: {RADIUS_SM}px;
             }}
+            QPushButton#actionButton:checked {{
+                background: {theme.C_ACCENT_SOFT};
+            }}
             QPushButton#actionButton:pressed {{
                 background: {theme.C_PRESS_CYAN};
             }}
         """)
 
-    def retranslate(self):
-        self.title_lbl.setText(tr(self._title_key))
-        self.sub_lbl.setText(tr(self._subtitle_key))
+    def _apply_label_styles(self):
+        active = self.isChecked()
         self._update_icon()
         self.title_lbl.setStyleSheet(
-            f"color: {theme.C_TEXT if not self._active else theme.C_ACCENT_TEXT}; {fs(15)} font-weight: 600; {transparent_bg()}"
+            f"color: {theme.C_ACCENT_TEXT if active else theme.C_TEXT}; {fs(15)} font-weight: 600; {transparent_bg()}"
         )
         self.sub_lbl.setStyleSheet(
-            f"color: {theme.C_TEXT_MUTED if not self._active else theme.C_ACCENT_TEXT}; {fs(11)} {transparent_bg()}"
+            f"color: {theme.C_ACCENT_TEXT if active else theme.C_TEXT_MUTED}; {fs(11)} {transparent_bg()}"
         )
+
+    def retranslate(self):
+        face = self.face()
+        self.title_lbl.setText(tr(face.title_key))
+        self.sub_lbl.setText(tr(face.sub_key))
+        self._apply_label_styles()
         self._apply_tile_style()
 
     def restyle(self):
@@ -101,6 +150,7 @@ class TempPanel(Card):
     def __init__(self, current=-0.0, target=36, flow_mode=1, parent=None):
         super().__init__(parent)
         self.set_card_name("tempPanel")
+        self._suppress = False
         layout = self.body()
         layout.setSpacing(s(8))
 
@@ -183,9 +233,26 @@ class TempPanel(Card):
     def _step(self, delta):
         self.slider.setValue(max(20, min(50, self.slider.value() + delta)))
 
+    def set_current(self, value):
+        number = parse_number(value)
+        if number is not None:
+            self.cur_val.setText(f"{number:.1f} °C")
+
+    def set_target(self, value, silent=True):
+        """Show the controller's target without sending it straight back."""
+        number = parse_number(value)
+        if number is None:
+            return
+        self._suppress = silent
+        try:
+            self.slider.setValue(int(round(number)))
+        finally:
+            self._suppress = False
+
     def _on_slider(self, value):
-        self.target_val.setText(f"{value}°C")
-        self.temp_changed.emit(value)
+        self.target_val.setText(f"{value} °C")
+        if not self._suppress:
+            self.temp_changed.emit(value)
 
     def restyle(self):
         super().restyle()
@@ -331,11 +398,52 @@ class WeatherStrip(Card):
 class HomeScreen(QWidget):
     navigate_settings = pyqtSignal()
 
-    def __init__(self, state=None, parent=None):
+    # Each tile is an independent two-state toggle. Its state comes from
+    # GET_STATUS, not from the last tap.
+    ACTIONS = (
+        ActionSpec(
+            key="mode", icon="power",
+            off=ActionFace("home.action.turn_on.title", "home.action.turn_on.sub",
+                           "api.turn_on", "SET_MODE", "AUTO"),
+            on=ActionFace("home.action.turn_off.title", "home.action.turn_off.sub",
+                          "api.turn_off", "SET_MODE", "OFF"),
+        ),
+        ActionSpec(
+            key="flow", icon="play",
+            off=ActionFace("home.action.start.title", "home.action.start.sub",
+                           "api.start", "START_FLOW", icon="play"),
+            on=ActionFace("home.action.stop.title", "home.action.stop.sub",
+                          "api.stop", "STOP_FLOW", icon="stop"),
+        ),
+        ActionSpec(
+            key="drain", icon="drop",
+            off=ActionFace("home.action.drain.title", "home.action.drain.sub",
+                           "api.drain", "SET_DRAIN", "OPEN"),
+            on=ActionFace("home.action.drain_close.title", "home.action.drain_close.sub",
+                          "api.drain_close", "SET_DRAIN", "CLOSE"),
+        ),
+        ActionSpec(
+            key="cold", icon="cold",
+            off=ActionFace("home.action.cold.title", "home.action.cold.sub",
+                           "api.cold", "SET_MODE", "COLD"),
+            on=ActionFace("home.action.cold_off.title", "home.action.cold_off.sub",
+                          "api.auto", "SET_MODE", "AUTO"),
+        ),
+    )
+
+    TEMP_DEBOUNCE_MS = 350
+
+    def __init__(self, state=None, link=None, parent=None):
         super().__init__(parent)
         self.state = state or {}
+        self.link = link
         self.setStyleSheet(f"background: {theme.C_BG};")
         self._action_buttons = []
+        self._last_status = {}
+        self._temp_timer = QTimer(self)
+        self._temp_timer.setSingleShot(True)
+        self._temp_timer.timeout.connect(self._flush_target_temp)
+        self._pending_temp = None
         self._build()
 
     def _build(self):
@@ -362,13 +470,9 @@ class HomeScreen(QWidget):
         actions.setColumnStretch(0, 1)
         actions.setColumnStretch(1, 1)
         self._action_buttons = []
-        for i, (title_key, sub_key, icon, active) in enumerate([
-            ("home.action.turn_on.title", "home.action.turn_on.sub", "power", False),
-            ("home.action.stop.title", "home.action.stop.sub", "stop", False),
-            ("home.action.drain.title", "home.action.drain.sub", "drop", True),
-            ("home.action.cold.title", "home.action.cold.sub", "cold", False),
-        ]):
-            btn = ActionButton(title_key, sub_key, icon, active=active)
+        for i, spec in enumerate(self.ACTIONS):
+            btn = ActionButton(spec)
+            btn.clicked.connect(lambda _checked=False, b=btn: self._send_action(b))
             self._action_buttons.append(btn)
             actions.addWidget(btn, i // 2, i % 2)
         action_wrap = QWidget()
@@ -406,9 +510,70 @@ class HomeScreen(QWidget):
             btn.retranslate()
         self.nav.retranslate()
 
+    def set_link_status(self, text, ok=None):
+        self.header.set_status(text[:16], ok)
+
+    def apply_status(self, fields):
+        """Reflect one GET_STATUS reply onto the screen."""
+        self._last_status = dict(fields or {})
+        self.temp.set_current(self._last_status.get("TUB"))
+        # While the user is mid-adjustment, don't fight their input.
+        if not self._temp_timer.isActive():
+            self.temp.set_target(self._last_status.get("TARGET"))
+        self._sync_action_tiles(self._last_status)
+
+    def apply_result(self, result):
+        """A refused command means the tile guessed wrong, so put it back."""
+        if result.ok or not self._last_status:
+            return
+        self._sync_action_tiles(self._last_status)
+
+    @staticmethod
+    def _engaged(key, status):
+        """Is this tile's feature currently on? None when status can't say."""
+        mode = (status.get("MODE") or "").upper()
+        if key == "mode":
+            return mode != "OFF" if mode else None
+        if key == "cold":
+            return mode == "COLD" if mode else None
+        if key == "flow":
+            flow = (status.get("FLOW") or "").upper()
+            return flow == "ON" if flow else None
+        if key == "drain":
+            drain = (status.get("DRAIN") or "").upper()
+            return drain == "OPEN" if drain else None
+        return None
+
+    def _sync_action_tiles(self, status):
+        """Set each tile from the controller's reported state, independently."""
+        for btn in self._action_buttons:
+            engaged = self._engaged(btn.spec.key, status)
+            if engaged is not None and engaged != btn.isChecked():
+                btn.setChecked(engaged)
+
+    def _send_action(self, button):
+        # Qt flips the checked state before emitting clicked, so the command to
+        # send belongs to the state the tile was in when it was tapped.
+        face = button.face(engaged=not button.isChecked())
+        if self.link is None:
+            return
+        self.link.send(face.command, face.param, label_key=face.label_key, coalesce="")
+
     def _on_set_temp(self, value):
         self.state["set_temp"] = value
         save_persisted(set_temp=value)
+        # Coalesce a slider drag into one command once the user settles.
+        self._pending_temp = value
+        self._temp_timer.start(self.TEMP_DEBOUNCE_MS)
+
+    def _flush_target_temp(self):
+        value, self._pending_temp = self._pending_temp, None
+        if value is None or self.link is None:
+            return
+        self.link.send(
+            "SET_TARGET_TEMP", float(value),
+            label_key="api.set_temp", coalesce="SET_TARGET_TEMP",
+        )
 
     def _on_flow_mode(self, mode):
         self.state["flow_mode"] = mode
