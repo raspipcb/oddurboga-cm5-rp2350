@@ -162,9 +162,9 @@ Read-only values from the physical sensors on the installation:
 
 | Reading | Source |
 |---------|--------|
-| **Tub** | Temp 1 — calibrated hot-tub water temperature |
-| **Inlet** | Temp 2 — mixed water after the motorized valve |
-| **Outdoor** | Temp 3 — optional outdoor ambient sensor |
+| **Tub** | Temp 2 — overflow / tub water (ADS1115 CH1) |
+| **Inlet** | Temp 1 — inlet / mix side on the control manifold (ADS1115 CH0) |
+| **Outdoor** | Temp 3 — optional outdoor ambient (ADS1115 CH2) |
 
 These update from controller status when the serial link is connected.
 

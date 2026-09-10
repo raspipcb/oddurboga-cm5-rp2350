@@ -97,8 +97,7 @@ VALUE 39.0
 
 ### GET_TUB_TEMP
 
-Returns the calibrated Temp 1 measurement representing the current
-hot-tub water temperature.
+Returns the calibrated **Temp 2** measurement (tub / overflow path).
 
 **Syntax**
 
@@ -114,8 +113,8 @@ VALUE 38.6
 
 ### GET_INLET_TEMP
 
-Returns Temp 2, the measured inlet-water temperature after hot/cold
-mixing (mixed water leaving the motorized valve toward the tub).
+Returns **Temp 1**, the inlet / control-side temperature (mix side on the
+manifold, ADS1115 CH0 via 4–20 mA).
 
 **Syntax**
 
@@ -184,7 +183,7 @@ OK
 
 ### SET_TUB_CAL
 
-Sets the installation calibration correction for Temp 1. Allowed
+Sets the installation calibration correction for **Temp 2** (tub). Allowed
 adjustment range: -10 °C to +10 °C.
 
 **Syntax**
@@ -412,20 +411,24 @@ GET_STATUS
 **Suggested Response**
 
 ```text
-STATUS MODE=AUTO TARGET=39.0 TUB=38.4 INLET=42.0 OUTDOOR=7.0 FLOW=ON DRAIN=CLOSED MIX=HEATING HEAT_CABLE=OFF AUX=OFF SAFETY=OK FAULT=NONE
+STATUS MODE=AUTO TARGET=39.0 TUB=38.4 INLET=42.0 OUTDOOR=7.0 FLOW=ON DRAIN=CLOSED MIX=HEATING HEAT_CABLE=OFF AUX=OFF SAFETY=OK FAULT=NONE ETA_MIN=12 FILL_S=180 PHASE=REGULATE
 ```
 
 Field meanings relative to the physical installation:
 
 | Field | Sensor / actuator | Physical meaning |
 |-------|-------------------|------------------|
-| `TUB` | Temp 1 | Calibrated hot-tub water temperature |
-| `INLET` | Temp 2 | Mixed water temperature after the motorized valve |
-| `OUTDOOR` | Temp 3 (optional) | Outdoor ambient temperature |
-| `FLOW` | Pump / inlet path | Controlled mixed-water feed into the tub |
-| `DRAIN` | Drain valve | Tub bottom drain toward sewer |
-| `MIX` | Motorized mixing valve | Hot/cold blend state |
-| `HEAT_CABLE` | Heating cable | Trace heat on the mixed-water feed pipe |
+| `TUB` | **Temp 2** (ADS CH1) | Tub / overflow water temperature (calibrated) |
+| `INLET` | **Temp 1** (ADS CH0) | Inlet / control-side mix temperature |
+| `OUTDOOR` | **Temp 3** (ADS CH2) | Outdoor ambient (optional) |
+| `FLOW` | Flow valve relay | Mixed-water feed into the tub |
+| `DRAIN` | Drain valve relay | Bottom drain toward sewer |
+| `MIX` | Mixing valve relays | `PRECOOL` / `HEATING` / `COOLING` / `HOLD` / `IDLE` / `RECOVER` |
+| `HEAT_CABLE` | Heat-cable relay | Trace heat on the mixed-water feed pipe |
+| `ETA_MIN` | Fill learner | Estimated minutes until tub ready (0 when idle) |
+| `FILL_S` | Fill learner | Seconds since current fill started |
+| `PHASE` | Sequencer | `IDLE` / `PRECOOL` / `FLOW` / `REGULATE` / `RECOVER` |
+| `SAFETY` | Latch | `OK` or `LOCKED` (needs `RECOVER`) |
 
 The CM5 can use this response for regular UI/status updates.
 
@@ -451,13 +454,40 @@ VALUE INLET_OVERTEMP
 
 ### CLEAR_FAULT
 
-Requests clearing of a latched fault. The RP2350 clears the fault only
+Requests clearing of a latched **soft** fault. The RP2350 clears the fault only
 when the underlying fault or unsafe condition has disappeared.
+
+Hard safety locks (`SAFETY=LOCKED` from overtemp or valve timeout) are **not**
+cleared by this command — use `RECOVER`.
 
 **Syntax**
 
 ```text
 CLEAR_FAULT
+```
+
+**Response**
+
+```text
+OK
+```
+
+### RECOVER
+
+Hard safety unlock (emulates a physical reset button). Sequence:
+
+1. Stop inlet flow immediately.
+2. Drive the mixing valve toward cold for 40 seconds.
+3. If sensors are back inside the safe band, clear `SAFETY=LOCKED` and resume
+   normal control; otherwise remain locked.
+
+The CM5 should show a confirmation UI (“inlet temperature too high — cool down
+and reset”) and send `RECOVER` when the operator confirms.
+
+**Syntax**
+
+```text
+RECOVER
 ```
 
 **Response**
@@ -514,13 +544,31 @@ OK
 Safety and real-time control do not depend on continuous CM5 commands.
 The RP2350 remains responsible for these functions locally.
 
-For example, if Temp 2 exceeds 49.9 °C, the RP2350 immediately stops
-inlet flow. The CM5 can read this condition using `GET_STATUS` or
-`GET_FAULT`, but it does not perform the safety cutoff itself.
+Hard rules enforced in firmware (`firmware/`):
+
+| Condition | Action |
+|-----------|--------|
+| Any valve relay continuously on for **120 s** | That drive forced OFF; `SAFETY=LOCKED`, `FAULT=VALVE_TIMEOUT`; wait for `RECOVER` |
+| **Temp 1** (inlet) ≥ **49.9 °C** | Flow relay OFF; `SAFETY=LOCKED`, `FAULT=INLET_OVERTEMP` |
+| **Temp 2** (tub) ≥ **49.0 °C** | Flow relay OFF **and** drain OPEN; `SAFETY=LOCKED`, `FAULT=TUB_OVERTEMP` |
+| Temp 1 or Temp 2 outside **−20…80 °C** | No valve activation; `FAULT=SENSOR_FAULT` |
+
+`RECOVER` runs the mixer toward cold for 40 s, then clears the lock only if
+temperatures are healthy again. A physical reset button may call the same path.
+
+Fill soft-start (not a CM5 concern): before opening flow, the mixer is driven
+cold for 30 s; after flow opens, inlet is regulated to
+`target + inlet_offset` (with learned fill-drop compensation).
 
 Hot/cold mixing, sensor reading, fill-stop/reheat behavior, drain
 sequencing, and physical output timing also remain internal RP2350
 functions.
+
+### RP2350 vs CM5 (co-work board mode)
+
+With the main-board **I2C jumper on MCU-I2C1**, only the RP2350 talks to the
+MCP23017 (relays) and ADS1115 (temperatures). The CM5 must use UART commands
+exclusively — never open those I2C devices from Linux while this jumper is set.
 
 ## Responsibility Boundary
 
@@ -537,10 +585,11 @@ functions.
 ### RP2350
 
 -   Reading Temp 1, Temp 2, and Temp 3
--   Applying Temp 1 calibration
+-   Applying Temp 2 (tub) calibration
 -   Real-time inlet-temperature control
 -   Hot/cold 3-way mixing control
--   Physical valve and relay operation
+-   Physical valve and relay operation (MCP23017)
+-   ADS1115 / 4–20 mA temperature acquisition
 -   Fill-stop and reheat logic
 -   Drain sequencing
 -   Local frost-related sequencing
@@ -552,11 +601,11 @@ functions.
 |--------------------|---------------------|-------------------------------------------------------------------|
 | `SET_TARGET_TEMP`  | `39.0`              | Set the desired hot-tub water temperature.                        |
 | `GET_TARGET_TEMP`  | —                   | Read the active target temperature.                               |
-| `GET_TUB_TEMP`     | —                   | Read calibrated Temp 1 / tub water temperature.                   |
-| `GET_INLET_TEMP`   | —                   | Read Temp 2 / mixed inlet-water temperature.                      |
+| `GET_TUB_TEMP`     | —                   | Read calibrated Temp 2 / tub water temperature.                   |
+| `GET_INLET_TEMP`   | —                   | Read Temp 1 / inlet (control-side) temperature.                   |
 | `SET_INLET_OFFSET` | `3.0`               | Configure the 1–5 °C inlet heat-loss compensation.                |
 | `SET_REHEAT_HYST`  | `2.0`               | Configure the 1–5 °C automatic reheat hysteresis.                 |
-| `SET_TUB_CAL`      | `2.0`               | Configure the -10 °C to +10 °C Temp 1 calibration.                |
+| `SET_TUB_CAL`      | `2.0`               | Configure the -10 °C to +10 °C Temp 2 (tub) calibration.          |
 | `SET_MODE`         | `AUTO / OFF / COLD` | Select the main system operating mode.                            |
 | `START_FLOW`       | —                   | Start/resume controlled inlet flow.                               |
 | `STOP_FLOW`        | —                   | Stop inlet flow without draining the tub.                         |
@@ -567,6 +616,7 @@ functions.
 | `SET_FROST_ACTIVE` | `0 / 1`             | Supply the current CM5/cloud frost condition to RP2350.           |
 | `GET_STATUS`       | —                   | Read temperatures and important operating states in one response. |
 | `GET_FAULT`        | —                   | Read the currently active fault or `NONE`.                        |
-| `CLEAR_FAULT`      | —                   | Clear a latched fault after its cause is removed.                 |
-| `GET_SYSTEM_INFO`  | —                   | Read firmware version and controller readiness.                   |
+| `CLEAR_FAULT`       | —                   | Clear a soft fault after its cause is removed.                    |
+| `RECOVER`           | —                   | Hard unlock: 40 s cold mix, then clear `SAFETY=LOCKED` if safe.   |
+| `GET_SYSTEM_INFO`   | —                   | Read firmware version and controller readiness.                   |
 | `PING`             | —                   | Check CM5 ↔ RP2350 communication; response is `OK`.               |

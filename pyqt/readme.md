@@ -95,8 +95,11 @@ Supported languages: `en`, `is`
 
 ## Controller link (CM_UART0 -> RP2350)
 
-The UI talks to the RP2350 over the cross-connected UART using the command set in
-[`CM5 RPI Commands in MD format.md`](../CM5%20RPI%20Commands%20in%20MD%20format.md).
+Co-work board mode: the **I2C jumper selects the RP2350**, so valves (MCP23017)
+and temperatures (ADS1115) are owned by firmware. The PyQt app on the CM5 only
+talks UART — never open those I2C devices from Linux while that jumper is set.
+
+Command set: [`doc/api.md`](../doc/api.md). Hardware: [`hardware/readme.md`](../hardware/readme.md).
 
 ```bash
 ./scripts/run.sh --port /dev/serial0    # explicit port
