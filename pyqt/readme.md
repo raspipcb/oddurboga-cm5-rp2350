@@ -156,9 +156,12 @@ with the title: a play triangle while stopped, a stop square while running.
 | Tile | Tap while off | Tap while on | On when |
 | ---- | ------------- | ------------ | ------- |
 | Turn on / Turn off | `SET_MODE AUTO` | `SET_MODE OFF` | `MODE != OFF` |
-| Start / Stop | `START_FLOW` | `STOP_FLOW` | `FLOW = ON` |
-| Drain / Close drain | `SET_DRAIN OPEN` | `SET_DRAIN CLOSE` | `DRAIN = OPEN` |
+| Start / Stop | `START_FLOW` | `STOP_FLOW` | `FLOW = ON` (logical; hot/cold valves) |
+| Drain / Close drain | `SET_DRAIN OPEN` | `SET_DRAIN CLOSE` | `DRAIN = OPEN` (Relay 2) |
 | Cold / Auto | `SET_MODE COLD` | `SET_MODE AUTO` | `MODE = COLD` |
+
+`START_FLOW` returns `OK` immediately; the RP2350 then soft-starts (cold 30 s,
+then regulate). `SAFETY=LOCKED` triggers a `RECOVER` from the UI.
 
 `Turn on` and `Cold` both drive `MODE`, so in cold mode both tiles read as on.
 A command the controller refuses (for example `SAFETY_LOCK`) reverts its tile.

@@ -122,6 +122,7 @@ class MainWindow(QMainWindow):
             link.info_updated.connect(self._on_info)
             self._apply_link_status()
             self.poll_timer.start()
+            self._last_safety = "OK"
 
         if fullscreen or on_pi():
             self.showFullScreen()
@@ -172,9 +173,18 @@ class MainWindow(QMainWindow):
     def _on_status(self, fields):
         self.home.apply_status(fields)
         self.settings.apply_status(fields)
+        safety = (fields.get("SAFETY") or "OK").upper()
         fault = (fields.get("FAULT") or "NONE").upper()
-        if fault not in ("NONE", ""):
+        # Edge-trigger: hard lock needs RECOVER (firmware cools cold valve locally).
+        if safety == "LOCKED" and getattr(self, "_last_safety", "OK") != "LOCKED":
+            self.toasts.show_toast(
+                f"{tr('err.SAFETY_LOCK')}: {fault} — {tr('api.recover')}",
+                LEVEL_ERROR,
+            )
+            self.link.send("RECOVER", label_key="api.recover")
+        elif fault not in ("NONE", "") and safety != "LOCKED":
             self.toasts.show_toast(f"{tr('api.status')}: {fault}", LEVEL_ERROR)
+        self._last_safety = safety
 
     def _on_info(self, fields):
         self.settings.apply_info(fields)

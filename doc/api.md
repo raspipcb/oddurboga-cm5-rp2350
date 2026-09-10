@@ -238,9 +238,10 @@ OK
 
 ### START_FLOW
 
-Requests inlet flow to start or resume. The RP2350 performs the hardware
-operation and may inhibit the request if a local safety condition is
-active.
+Requests inlet fill/regulate to start or resume. The RP2350 replies `OK`
+immediately (or `ERROR …`), then runs soft-start locally: open cold for 30 s,
+then regulate with hot/cold. There is no separate flow relay — inlet water is
+admitted by Relay 0 (hot) and/or Relay 1 (cold).
 
 **Syntax**
 
@@ -256,7 +257,7 @@ OK
 
 ### STOP_FLOW
 
-Stops inlet flow without requesting the tub to drain.
+Stops inlet fill by closing hot and cold valves. Does not drain the tub.
 
 **Syntax**
 
@@ -422,10 +423,10 @@ Field meanings relative to the physical installation:
 | `TUB` | **Temp 2** (ADS CH1) | Tub-wall water temperature (calibrated) |
 | `INLET` | **Temp 1** (ADS CH0) | Inlet / control-side mix temperature |
 | `OUTDOOR` | **Temp 3** (ADS CH2) | Outdoor ambient (optional) |
-| `FLOW` | Flow valve relay | Mixed-water feed into the tub |
-| `DRAIN` | Drain valve relay | Bottom drain toward sewer |
-| `MIX` | Mixing valve relays | `PRECOOL` / `HEATING` / `COOLING` / `HOLD` / `IDLE` / `RECOVER` |
-| `HEAT_CABLE` | Heat-cable relay | Trace heat on the mixed-water feed pipe |
+| `FLOW` | Logical inlet state | `ON` when filling/regulating (hot and/or cold open); not a separate relay |
+| `DRAIN` | **Relay 2** drain valve | Bottom drain toward sewer |
+| `MIX` | **Relay 0/1** hot/cold | `PRECOOL` / `HEATING` / `COOLING` / `HOLD` / `IDLE` / `RECOVER` |
+| `HEAT_CABLE` | Software flag | Reserved; no dedicated relay on Relay 0–2 build |
 | `ETA_MIN` | Fill learner | Estimated minutes until tub ready (0 when idle) |
 | `FILL_S` | Fill learner | Seconds since current fill started |
 | `PHASE` | Sequencer | `IDLE` / `PRECOOL` / `FLOW` / `REGULATE` / `RECOVER` |
@@ -475,12 +476,12 @@ OK
 
 ### RECOVER
 
-Hard safety unlock (emulates a physical reset button). Sequence:
+Hard unlock (emulates a physical reset button). The reply is immediate
+`OK`. Locally the firmware then:
 
-1. Stop inlet flow immediately.
-2. Drive the mixing valve toward cold for 40 seconds.
-3. If sensors are back inside the safe band, clear `SAFETY=LOCKED` and resume
-   normal control; otherwise remain locked.
+1. Closes hot (Relay 0); opens cold (Relay 1) for 40 seconds.
+2. If sensors are back inside the safe band, clears `SAFETY=LOCKED` and resumes
+   normal control; otherwise remains locked.
 
 The CM5 should show a confirmation UI (“inlet temperature too high — cool down
 and reset”) and send `RECOVER` when the operator confirms.
@@ -550,16 +551,17 @@ Hard rules enforced in firmware (`firmware/`):
 | Condition | Action |
 |-----------|--------|
 | Any valve relay continuously on for **120 s** | That drive forced OFF; `SAFETY=LOCKED`, `FAULT=VALVE_TIMEOUT`; wait for `RECOVER` |
-| **Temp 1** (inlet) ≥ **49.9 °C** | Flow relay OFF; `SAFETY=LOCKED`, `FAULT=INLET_OVERTEMP` |
-| **Temp 2** (tub) ≥ **49.0 °C** | Flow relay OFF **and** drain OPEN; `SAFETY=LOCKED`, `FAULT=TUB_OVERTEMP` |
+| **Temp 1** (inlet) ≥ **49.9 °C** | Close hot + cold; `SAFETY=LOCKED`, `FAULT=INLET_OVERTEMP` |
+| **Temp 2** (tub) ≥ **49.0 °C** | Close hot + cold **and** open drain; `SAFETY=LOCKED`, `FAULT=TUB_OVERTEMP` |
 | Temp 1 or Temp 2 outside **−20…80 °C** | No valve activation; `FAULT=SENSOR_FAULT` |
 
-`RECOVER` runs the mixer toward cold for 40 s, then clears the lock only if
+`RECOVER` opens **cold (Relay 1)** for 40 s, then clears the lock only if
 temperatures are healthy again. A physical reset button may call the same path.
 
-Fill soft-start (not a CM5 concern): before opening flow, the mixer is driven
-cold for 30 s; after flow opens, inlet is regulated to
-`target + inlet_offset` (with learned fill-drop compensation).
+Fill soft-start (not a CM5 concern): `START_FLOW` returns `OK` immediately.
+Locally the firmware then opens **cold (Relay 1)** for 30 s, then bang-bang
+regulates hot (Relay 0) / cold (Relay 1) toward `target + inlet_offset`.
+Hot and cold are never energized together.
 
 Hot/cold mixing, sensor reading, fill-stop/reheat behavior, drain
 sequencing, and physical output timing also remain internal RP2350
@@ -588,8 +590,8 @@ exclusively — never open those I2C devices from Linux while this jumper is set
 -   Reading Temp 1, Temp 2, and Temp 3
 -   Applying Temp 2 (tub) calibration
 -   Real-time inlet-temperature control
--   Hot/cold 3-way mixing control
--   Physical valve and relay operation (MCP23017)
+-   Hot/cold inlet valve control (Relay 0 / Relay 1)
+-   Physical drain valve (Relay 2)
 -   ADS1115 / 4–20 mA temperature acquisition
 -   Fill-stop and reheat logic
 -   Drain sequencing

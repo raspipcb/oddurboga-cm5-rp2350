@@ -88,7 +88,7 @@ from the controller (`GET_STATUS`), not only from the last tap.
 | Button | Tap while off | Tap while on |
 |--------|---------------|--------------|
 | **Turn on / Turn off** | Start automatic fill/mix/maintain | Stop automatic control |
-| **Start / Stop** | Start mixed-water inlet flow | Stop inlet flow (tub stays filled) |
+| **Start / Stop** | Start inlet fill (hot/cold valves; soft-start is on the controller) | Close hot and cold (tub stays filled) |
 | **Drain / Close drain** | Open the drain valve to sewer | Close the drain valve |
 | **Cold / Auto** | Prefer cold injection | Return to normal auto mode |
 

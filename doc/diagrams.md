@@ -186,7 +186,9 @@ flowchart TD
   CTL --> TICK
 ```
 
-**Soft-start note:** `START_FLOW` opens **Relay 1 (cold)** for 30 s first, then bang-bang regulates with Relay 0 (hot) / Relay 1 (cold). Hot and cold are never on together.
+**Soft-start note:** `START_FLOW` returns `OK` immediately. Locally the firmware
+opens **Relay 1 (cold)** for ~30 s, then bang-bang regulates with Relay 0 (hot) /
+Relay 1 (cold). Hot and cold are never on together.
 
 ---
 
@@ -208,14 +210,16 @@ sequenceDiagram
 
   UI->>UART: START_FLOW
   UART->>FW: START_FLOW
+  FW-->>UART: OK
+  UART-->>UI: OK (immediate)
 
-  Note over FW,R1: Soft-start — cold first
+  Note over FW,R1: Soft-start locally — cold first (~30 s)
   FW->>MCP: set Relay1 ON
   MCP->>R1: cold valve open
   FW->>MCP: set Relay0 OFF
   MCP->>R0: hot valve closed
 
-  Note over FW: after 30 s — regulate
+  Note over FW: Then regulate (hot/cold bang-bang)
   FW->>MCP: set Relay0 / Relay1
   MCP->>R0: hot as needed
   MCP->>R1: cold as needed
@@ -232,6 +236,9 @@ sequenceDiagram
     MCP->>R2: drain valve open
   end
 
-  FW->>UART: STATUS TUB=… INLET=… FLOW=ON …
+  FW->>UART: STATUS … FLOW=ON PHASE=REGULATE …
   UART->>UI: update tiles / temps
 ```
+
+`START_FLOW` / `RECOVER` always answer on UART right away. The 30 s / 40 s
+intervals are local plant sequencing, visible later via `GET_STATUS` (`PHASE`).

@@ -84,6 +84,9 @@ class MockTransport:
             "AUX": "OFF",
             "SAFETY": "OK",
             "FAULT": "NONE",
+            "PHASE": "IDLE",
+            "ETA_MIN": "0",
+            "FILL_S": "0",
             "INLET_OFFSET": 3.0,
             "REHEAT_HYST": 2.0,
             "TUB_CAL": 0.0,
@@ -148,12 +151,21 @@ class MockTransport:
             self._state["MODE"] = param.upper()
             return "OK"
         if cmd == "START_FLOW":
+            if self._state["SAFETY"] != "OK":
+                return "ERROR SAFETY_LOCK"
+            # Reply is immediate; plant soft-start is local (PRECOOL then REGULATE).
             self._state["FLOW"] = "ON"
+            self._state["MIX"] = "PRECOOL"
+            self._state["PHASE"] = "REGULATE"
             self._state["MIX"] = "HEATING"
+            self._state["ETA_MIN"] = "12"
             return "OK"
         if cmd == "STOP_FLOW":
             self._state["FLOW"] = "OFF"
             self._state["MIX"] = "IDLE"
+            self._state["PHASE"] = "IDLE"
+            self._state["ETA_MIN"] = "0"
+            self._state["FILL_S"] = "0"
             return "OK"
         if cmd == "SET_DRAIN":
             if param.upper() not in ("OPEN", "CLOSE"):
@@ -166,7 +178,18 @@ class MockTransport:
                 self._state[key] = param.upper()
             return "OK"
         if cmd == "CLEAR_FAULT":
+            if self._state["SAFETY"] == "LOCKED":
+                return "ERROR SAFETY_LOCK"
             self._state["FAULT"] = "NONE"
+            return "OK"
+        if cmd == "RECOVER":
+            # Immediate OK; cool-down is local. Mock unlocks right away.
+            self._state["FLOW"] = "OFF"
+            self._state["MIX"] = "RECOVER"
+            self._state["PHASE"] = "IDLE"
+            self._state["SAFETY"] = "OK"
+            self._state["FAULT"] = "NONE"
+            self._state["MIX"] = "IDLE"
             return "OK"
 
         if cmd == "GET_TARGET_TEMP":
@@ -178,13 +201,14 @@ class MockTransport:
         if cmd == "GET_FAULT":
             return f"VALUE {self._state['FAULT']}"
         if cmd == "GET_SYSTEM_INFO":
-            return "INFO FW=1.0.0-sim STATE=READY"
+            state = "LOCKED" if self._state["SAFETY"] == "LOCKED" else "READY"
+            return f"INFO FW=1.0.0-sim STATE={state}"
         if cmd == "PING":
             return "OK"
         if cmd == "GET_STATUS":
             keys = (
                 "MODE", "TARGET", "TUB", "INLET", "OUTDOOR", "FLOW", "DRAIN", "MIX",
-                "HEAT_CABLE", "AUX", "SAFETY", "FAULT",
+                "HEAT_CABLE", "AUX", "SAFETY", "FAULT", "ETA_MIN", "FILL_S", "PHASE",
             )
             body = " ".join(f"{k}={self._state[k]}" for k in keys)
             return f"STATUS {body}"
