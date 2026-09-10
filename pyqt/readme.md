@@ -163,9 +163,9 @@ A command the controller refuses (for example `SAFETY_LOCK`) reverts its tile.
 | Other control | Command |
 | ------------- | ------- |
 | Set-temperature slider | `SET_TARGET_TEMP` (debounced 350 ms) |
-| Turn-on threshold | `SET_REHEAT_HYST` (1-5 °C) |
-| Extra heat | `SET_INLET_OFFSET` (1-5 °C) |
-| Status poll | `GET_STATUS` -> temperatures, tile states |
+| Reheat margin | `SET_REHEAT_HYST` (1-5 °C) |
+| Inlet offset | `SET_INLET_OFFSET` (1-5 °C) |
+| Status poll | `GET_STATUS` -> tub / inlet / outdoor temps, tile states |
 
 Run the test suites with:
 

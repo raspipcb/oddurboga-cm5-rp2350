@@ -68,10 +68,10 @@ The top bar appears on every screen.
 | Element | Description |
 |---------|-------------|
 | **IPS logo** | Branding (top left) |
-| **Connection status** | Green dot and text showing WiFi status, e.g. `Connected -57 dBm` |
+| **Connection status** | Green/red indicator for the controller link (and WiFi when shown), e.g. `Connected` or `Simulated` |
 | **Theme toggle** | Sun icon = light theme, moon icon = dark theme. Tap to switch. |
 
-If the connection indicator shows a problem, check that the controller is powered on and within range of your WiFi network.
+If the connection indicator shows a problem, check that the controller is powered and the UART link (or mock mode) is available.
 
 ---
 
@@ -81,16 +81,18 @@ The home screen is split into a **left action grid** and a **right information p
 
 ### Quick actions (left)
 
-Four large buttons control the tub. Tap a button to trigger its action.
+Four large tiles are independent toggles. The background shows whether the
+feature is on; the title shows what the next tap will do. State is reconciled
+from the controller (`GET_STATUS`), not only from the last tap.
 
-| Button | What it does |
-|--------|----------------|
-| **Turn on** | Start the hot tub |
-| **Stop** | Stop water flow in the tub |
-| **Drain** | Drain the hot tub |
-| **Cold** | Cold injection *(coming soon — not yet active)* |
+| Button | Tap while off | Tap while on |
+|--------|---------------|--------------|
+| **Turn on / Turn off** | Start automatic fill/mix/maintain | Stop automatic control |
+| **Start / Stop** | Start mixed-water inlet flow | Stop inlet flow (tub stays filled) |
+| **Drain / Close drain** | Open the drain valve to sewer | Close the drain valve |
+| **Cold / Auto** | Prefer cold injection | Return to normal auto mode |
 
-Each button shows a short subtitle under the title so you can confirm the action before tapping.
+Each tile shows a short subtitle under the title so you can confirm the action before tapping.
 
 ### Weather forecast (top right)
 
@@ -144,25 +146,27 @@ The settings screen has four sections arranged in two columns.
 
 ### Temperature settings (top left)
 
-Fine-tune when the heater turns on and how much extra heat is applied.
+Fine-tune reheating and inlet heat-loss compensation. Ranges match the
+controller API (1–5 °C).
 
 | Slider | Range | Purpose |
 |--------|-------|---------|
-| **Turn-on threshold** | −10 to 30 °C | Temperature below which the system starts heating |
-| **Extra heat** | 0 to 20 °C | Additional heat offset applied during warm-up |
+| **Reheat margin** | 1–5 °C | How far the tub may fall below target before automatic reheating resumes |
+| **Inlet offset** | 1–5 °C | How much hotter mixed inlet water should be than the tub target (pipe heat loss) |
 
-Drag each slider to adjust. The current value is shown on the right in large text. Changes are saved automatically.
+Drag each slider to adjust. The current value is shown on the right in large text. Changes are saved automatically and sent to the controller.
 
 ### Temperature sensors (bottom left)
 
-Read-only values from the physical sensors:
+Read-only values from the physical sensors on the installation:
 
 | Reading | Source |
 |---------|--------|
-| **Tub** | Water temperature at the tub sensor |
-| **Controller** | Temperature at the control unit |
+| **Tub** | Temp 1 — calibrated hot-tub water temperature |
+| **Inlet** | Temp 2 — mixed water after the motorized valve |
+| **Outdoor** | Temp 3 — optional outdoor ambient sensor |
 
-These update when live sensor data is connected to the controller.
+These update from controller status when the serial link is connected.
 
 ### About device (top right)
 
@@ -218,9 +222,9 @@ The following choices are written to `config.json` in the project folder and res
 | Setting | Where changed |
 |---------|----------------|
 | Set temperature | Home → Temperature in tub |
-| Flow mode (Continuous / Medium / Low flow) | Home → Temperature in tub |
-| Turn-on threshold | Settings → Temperature settings |
-| Extra heat | Settings → Temperature settings |
+| Flow mode (Continuous / Medium / Low flow) | Home → Temperature in tub *(local preference; not a controller command)* |
+| Reheat margin | Settings → Temperature settings |
+| Inlet offset | Settings → Temperature settings |
 | Language | Settings → Language |
 | Theme (light / dark) | Header bar |
 

@@ -88,8 +88,12 @@ class SettingsScreen(QWidget):
         sensors_body.addWidget(self.sensors_section)
         self.pot_card = MetricCard("", f"{self.state.get('pot_temp', -0.0):.1f} °C")
         self.control_card = MetricCard("", f"{self.state.get('control_val', 0):.1f} °C")
+        outdoor = self.state.get("outdoor_temp")
+        outdoor_text = f"{outdoor:.1f} °C" if outdoor is not None else "—"
+        self.outdoor_card = MetricCard("", outdoor_text)
         sensors_body.addWidget(self.pot_card)
         sensors_body.addWidget(self.control_card)
+        sensors_body.addWidget(self.outdoor_card)
         col.addWidget(sensors_card)
 
         col.addStretch()
@@ -152,6 +156,7 @@ class SettingsScreen(QWidget):
         self.sensors_section.setText(tr("settings.sensors"))
         self.pot_card.label.setText(tr("settings.sensor_pot"))
         self.control_card.label.setText(tr("settings.sensor_control"))
+        self.outdoor_card.label.setText(tr("settings.sensor_outdoor"))
 
         self.about_section.setText(tr("settings.about"))
         self.software_row.left.setText(tr("settings.software"))
@@ -176,6 +181,14 @@ class SettingsScreen(QWidget):
         inlet = parse_number(status.get("INLET"))
         if inlet is not None:
             self.control_card.set_value(f"{inlet:.1f} °C")
+        # Temp 3 is optional; accept either field name from the controller.
+        outdoor = parse_number(status.get("OUTDOOR"))
+        if outdoor is None:
+            outdoor = parse_number(status.get("TEMP3"))
+        if outdoor is not None:
+            self.outdoor_card.set_value(f"{outdoor:.1f} °C")
+        elif "OUTDOOR" in status or "TEMP3" in status:
+            self.outdoor_card.set_value("—")
 
     def apply_info(self, fields):
         """Reflect one GET_SYSTEM_INFO reply onto the about card."""
@@ -214,6 +227,7 @@ class SettingsScreen(QWidget):
         self.extra.restyle()
         self.pot_card.restyle()
         self.control_card.restyle()
+        self.outdoor_card.restyle()
         self.software_row.restyle()
         self.wifi_row.restyle()
         self.device_row.restyle()

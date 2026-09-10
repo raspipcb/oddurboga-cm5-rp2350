@@ -76,6 +76,7 @@ class MockTransport:
             "TARGET": 39.0,
             "TUB": 37.4,
             "INLET": 41.2,
+            "OUTDOOR": 7.0,
             "FLOW": "OFF",
             "DRAIN": "CLOSED",
             "MIX": "IDLE",
@@ -182,7 +183,7 @@ class MockTransport:
             return "OK"
         if cmd == "GET_STATUS":
             keys = (
-                "MODE", "TARGET", "TUB", "INLET", "FLOW", "DRAIN", "MIX",
+                "MODE", "TARGET", "TUB", "INLET", "OUTDOOR", "FLOW", "DRAIN", "MIX",
                 "HEAT_CABLE", "AUX", "SAFETY", "FAULT",
             )
             body = " ".join(f"{k}={self._state[k]}" for k in keys)

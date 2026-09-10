@@ -115,7 +115,7 @@ VALUE 38.6
 ### GET_INLET_TEMP
 
 Returns Temp 2, the measured inlet-water temperature after hot/cold
-mixing.
+mixing (mixed water leaving the motorized valve toward the tub).
 
 **Syntax**
 
@@ -412,8 +412,20 @@ GET_STATUS
 **Suggested Response**
 
 ```text
-STATUS MODE=AUTO TARGET=39.0 TUB=38.4 INLET=42.0 FLOW=ON DRAIN=CLOSED MIX=HEATING HEAT_CABLE=OFF AUX=OFF SAFETY=OK FAULT=NONE
+STATUS MODE=AUTO TARGET=39.0 TUB=38.4 INLET=42.0 OUTDOOR=7.0 FLOW=ON DRAIN=CLOSED MIX=HEATING HEAT_CABLE=OFF AUX=OFF SAFETY=OK FAULT=NONE
 ```
+
+Field meanings relative to the physical installation:
+
+| Field | Sensor / actuator | Physical meaning |
+|-------|-------------------|------------------|
+| `TUB` | Temp 1 | Calibrated hot-tub water temperature |
+| `INLET` | Temp 2 | Mixed water temperature after the motorized valve |
+| `OUTDOOR` | Temp 3 (optional) | Outdoor ambient temperature |
+| `FLOW` | Pump / inlet path | Controlled mixed-water feed into the tub |
+| `DRAIN` | Drain valve | Tub bottom drain toward sewer |
+| `MIX` | Motorized mixing valve | Hot/cold blend state |
+| `HEAT_CABLE` | Heating cable | Trace heat on the mixed-water feed pipe |
 
 The CM5 can use this response for regular UI/status updates.
 
