@@ -7,10 +7,13 @@ Relay assignment (production):
 
 | Relay | Valve |
 |-------|--------|
-| **0** | Mixing (3-way) |
-| **1** | Flow |
-| **2** | Drain |
+| **0** | Hot water valve |
+| **1** | Cold water valve |
+| **2** | Drain valve |
 | 3–5 | Unused |
+
+Inlet “flow” is logical (`START_FLOW` / `STOP_FLOW`): water enters when the
+hot and/or cold valve is open. There is no separate flow relay.
 
 ---
 
@@ -24,8 +27,9 @@ flowchart LR
   end
 
   T1(["TE Temp1<br/>inlet / mix"])
-  MIX{{"XV-MIX<br/>3-way mixing valve<br/>Relay 0"}}
-  FLOW{{"XV-FLOW<br/>flow valve<br/>Relay 1"}}
+  VH{{"XV-HOT<br/>hot water valve<br/>Relay 0"}}
+  VC{{"XV-COLD<br/>cold water valve<br/>Relay 1"}}
+  MIX["Mixing manifold"]
   HC["Heating cable<br/>on feed pipe"]
   TUB[("Hot tub")]
   T2(["TE Temp2<br/>tub / overflow"])
@@ -33,15 +37,15 @@ flowchart LR
   SEWER["To sewer"]
   T3(["TE Temp3<br/>outdoor optional"])
 
-  HOT --> T1 --> MIX
-  COLD --> MIX
-  MIX -->|"mixed water OUT"| FLOW --> HC --> TUB
+  HOT --> VH --> MIX
+  COLD --> VC --> MIX
+  MIX --> T1 --> HC --> TUB
   TUB --> T2 --> SEWER
   TUB --> DRAIN --> SEWER
   T3 -.->|"ambient"| TUB
 ```
 
-**Legend:** `TE` = temperature element · `XV` = on/off or motorized valve · cylinder = vessel/tub
+**Legend:** `TE` = temperature element · `XV` = valve · cylinder = vessel/tub
 
 ---
 
@@ -51,8 +55,8 @@ flowchart LR
 flowchart TB
   subgraph PLANT["Field devices"]
     direction LR
-    V0["XV-MIX<br/>Relay 0"]
-    V1["XV-FLOW<br/>Relay 1"]
+    V0["XV-HOT<br/>Relay 0"]
+    V1["XV-COLD<br/>Relay 1"]
     V2["XV-DRAIN<br/>Relay 2"]
     S1["Temp1 PT1000<br/>4–20 mA"]
     S2["Temp2 PT1000<br/>4–20 mA"]
@@ -159,19 +163,18 @@ flowchart TD
 
   subgraph TICK["Controller.tick"]
     SEN[Read Temp1/2/3 via ADS1115] --> SAF[Safety.evaluate]
-    SAF -->|INLET≥49.9| K1[Flow OFF + LOCK]
-    SAF -->|TUB≥49.0| K2[Flow OFF + Drain OPEN + LOCK]
-    SAF -->|relay on >120s| K3[Force relay OFF + LOCK]
+    SAF -->|INLET≥49.9| K1[Close hot+cold + LOCK]
+    SAF -->|TUB≥49.0| K2[Close hot+cold + Drain OPEN + LOCK]
+    SAF -->|relay on >120s| K3[Force that relay OFF + LOCK]
     SAF --> PHASE
 
     subgraph PHASE["Sequencer"]
-      Idle[IDLE] -->|START_FLOW / auto reheat| Pre[PRECOOL<br/>Relay0 cold 30s]
-      Pre --> Open[Open FLOW<br/>Relay1 ON]
-      Open --> Reg[REGULATE<br/>mix bang-bang to inlet SP]
+      Idle[IDLE] -->|START_FLOW / auto reheat| Pre[PRECOOL<br/>Relay1 cold 30s]
+      Pre --> Reg[REGULATE<br/>Relay0/1 bang-bang<br/>to inlet setpoint]
       Reg -->|tub rise ≥5°C/10s| Fill[Fill learned / ETA]
-      Reg -->|tub ≥ target| Idle
+      Reg -->|tub ≥ target| Idle2[Close hot+cold → IDLE]
       Idle -->|STOP_FLOW| Idle
-      LOCK[SAFETY LOCKED] -->|RECOVER| Rec[RECOVER<br/>mix cold 40s]
+      LOCK[SAFETY LOCKED] -->|RECOVER| Rec[RECOVER<br/>Relay1 cold 40s]
       Rec -->|temps OK| Idle
     end
   end
@@ -179,7 +182,7 @@ flowchart TD
   CTL --> TICK
 ```
 
-**Soft-start note:** before `Relay1` (flow) opens, `Relay0` (mix) is held toward cold for 30 s so the manifold does not dump ~60 °C water into the tub.
+**Soft-start note:** `START_FLOW` opens **Relay 1 (cold)** for 30 s first, then bang-bang regulates with Relay 0 (hot) / Relay 1 (cold). Hot and cold are never on together.
 
 ---
 
@@ -192,16 +195,16 @@ sequenceDiagram
   participant FW as RP2350 firmware
   participant MCP as MCP23017
   participant ADS as ADS1115
-  participant V as Valves 0/1/2
+  participant V as Relays 0/1/2
   participant T as Temp1/2/3
 
   UI->>UART: START_FLOW
   UART->>FW: START_FLOW
-  FW->>MCP: Relay0 precool cold
-  FW->>MCP: Relay1 flow ON
+  FW->>MCP: Relay1 cold ON (precool)
+  Note over FW: after 30 s
+  FW->>MCP: Relay0/1 regulate mix
   FW->>ADS: read CH0/CH1/CH2
   ADS->>T: 4–20 mA loops
-  FW->>MCP: Relay0 mix regulate
   FW->>UART: STATUS TUB=… INLET=… FLOW=ON …
   UART->>UI: update tiles / temps
 ```
