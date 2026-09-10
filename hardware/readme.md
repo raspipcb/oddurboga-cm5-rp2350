@@ -51,7 +51,7 @@ CM5 runs Linux + the PyQt app and **must not** drive the expander/ADC while the 
 | Valve | **Drain** to sewer | **Relay 2** (energized = open) |
 | — | Relays 3–5 | **Unused** |
 | Temp 1 | Inlet / between heat meter & mixer | ADS CH0 → firmware `INLET` |
-| Temp 2 | Tub / after overflow | ADS CH1 → firmware `TUB` |
+| Temp 2 | Tub wall (not overflow) | ADS CH1 → firmware `TUB` |
 | Temp 3 | Outdoor (optional) | ADS CH2 → firmware `OUTDOOR` |
 
 Architecture Mermaid diagrams: [`doc/diagrams.md`](../doc/diagrams.md).

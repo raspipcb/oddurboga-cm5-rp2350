@@ -32,7 +32,8 @@ flowchart LR
   MIX["Mixing manifold"]
   HC["Heating cable<br/>on feed pipe"]
   TUB[("Hot tub")]
-  T2(["TE Temp2<br/>tub / overflow"])
+  T2(["TE Temp2<br/>tub wall"])
+  OF["Overflow<br/>to sewer"]
   DRAIN{{"XV-DRAIN<br/>drain valve<br/>Relay 2"}}
   SEWER["To sewer"]
   T3(["TE Temp3<br/>outdoor optional"])
@@ -40,12 +41,15 @@ flowchart LR
   HOT --> VH --> MIX
   COLD --> VC --> MIX
   MIX --> T1 --> HC --> TUB
-  TUB --> T2 --> SEWER
+  TUB --- T2
+  TUB --> OF --> SEWER
   TUB --> DRAIN --> SEWER
   T3 -.->|"ambient"| TUB
 ```
 
 **Legend:** `TE` = temperature element · `XV` = valve · cylinder = vessel/tub
+
+Temp2 is a tub-wall probe. Overflow is a separate outlet to sewer — not the Temp2 location.
 
 ---
 
@@ -59,7 +63,7 @@ flowchart TB
     V1["XV-COLD<br/>Relay 1"]
     V2["XV-DRAIN<br/>Relay 2"]
     S1["Temp1 PT1000<br/>4–20 mA"]
-    S2["Temp2 PT1000<br/>4–20 mA"]
+    S2["Temp2 PT1000<br/>tub wall"]
     S3["Temp3 PT1000<br/>4–20 mA"]
   end
 

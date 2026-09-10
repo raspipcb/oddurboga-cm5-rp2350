@@ -97,7 +97,8 @@ VALUE 39.0
 
 ### GET_TUB_TEMP
 
-Returns the calibrated **Temp 2** measurement (tub / overflow path).
+Returns the calibrated **Temp 2** measurement (tub-wall probe). Overflow is a
+separate outlet and is not this sensor.
 
 **Syntax**
 
@@ -418,7 +419,7 @@ Field meanings relative to the physical installation:
 
 | Field | Sensor / actuator | Physical meaning |
 |-------|-------------------|------------------|
-| `TUB` | **Temp 2** (ADS CH1) | Tub / overflow water temperature (calibrated) |
+| `TUB` | **Temp 2** (ADS CH1) | Tub-wall water temperature (calibrated) |
 | `INLET` | **Temp 1** (ADS CH0) | Inlet / control-side mix temperature |
 | `OUTDOOR` | **Temp 3** (ADS CH2) | Outdoor ambient (optional) |
 | `FLOW` | Flow valve relay | Mixed-water feed into the tub |
