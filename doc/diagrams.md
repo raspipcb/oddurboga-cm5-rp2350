@@ -198,17 +198,40 @@ sequenceDiagram
   participant UART as CM_UART0 ↔ MCU_UART0
   participant FW as RP2350 firmware
   participant MCP as MCP23017
+  participant R0 as Relay 0 (hot)
+  participant R1 as Relay 1 (cold)
+  participant R2 as Relay 2 (drain)
   participant ADS as ADS1115
-  participant V as Relays 0/1/2
-  participant T as Temp1/2/3
+  participant T1 as Temp1
+  participant T2 as Temp2
+  participant T3 as Temp3
 
   UI->>UART: START_FLOW
   UART->>FW: START_FLOW
-  FW->>MCP: Relay1 cold ON (precool)
-  Note over FW: after 30 s
-  FW->>MCP: Relay0/1 regulate mix
+
+  Note over FW,R1: Soft-start — cold first
+  FW->>MCP: set Relay1 ON
+  MCP->>R1: cold valve open
+  FW->>MCP: set Relay0 OFF
+  MCP->>R0: hot valve closed
+
+  Note over FW: after 30 s — regulate
+  FW->>MCP: set Relay0 / Relay1
+  MCP->>R0: hot as needed
+  MCP->>R1: cold as needed
+
+  Note over T1,ADS: Continuous sensing (I2C)
+  T1->>ADS: 4–20 mA (CH0)
+  T2->>ADS: 4–20 mA (CH1)
+  T3->>ADS: 4–20 mA (CH2)
   FW->>ADS: read CH0/CH1/CH2
-  ADS->>T: 4–20 mA loops
+  ADS-->>FW: inlet / tub / outdoor °C
+
+  opt Drain request
+    FW->>MCP: set Relay2 ON
+    MCP->>R2: drain valve open
+  end
+
   FW->>UART: STATUS TUB=… INLET=… FLOW=ON …
   UART->>UI: update tiles / temps
 ```
