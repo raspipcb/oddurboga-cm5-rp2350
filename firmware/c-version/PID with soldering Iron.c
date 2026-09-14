@@ -1,0 +1,713 @@
+#include <stdio.h>
+#include <stdbool.h>
+
+#include "pico/stdlib.h"
+#include "hardware/i2c.h"
+
+/* =========================================================
+ * Hardware Configuration
+ * ========================================================= */
+
+#define I2C_PORT               i2c1
+#define SDA_PIN                6
+#define SCL_PIN                7
+
+#define ADS1115_ADDR           0x49
+#define MCP_ADDR               0x20
+
+#define CONTROL_PERIOD_MS      500
+
+#define TARGET_TEMP_C          100.0f
+#define MAX_TEMP_C             108.0f
+
+/*
+ * Mechanical relay control window
+ *
+ * PID 100% -> ON 10 s
+ * PID 50%  -> ON 5 s / OFF 5 s
+ * PID 20%  -> ON 2 s / OFF 8 s
+ */
+#define RELAY_WINDOW_MS        5000
+
+
+/* =========================================================
+ * MCP23017 Registers
+ * ========================================================= */
+
+#define MCP_IODIRA             0x00
+#define MCP_IODIRB             0x01
+
+#define MCP_OLATA              0x14
+#define MCP_OLATB              0x15
+
+
+/* =========================================================
+ * MCP Output Bits
+ * ========================================================= */
+
+/* GPA0 = 24V enable */
+#define ENABLE_24V_BIT         0x01
+
+/* GPB0 = heater relay */
+#define HEATER_RELAY_BIT       0x01
+
+
+/* =========================================================
+ * PID Structure
+ * ========================================================= */
+
+typedef struct
+{
+    float kp;
+    float ki;
+    float kd;
+
+    float integral;
+    float previous_error;
+
+    float output_min;
+    float output_max;
+
+} PID_t;
+
+
+/* =========================================================
+ * PID Function
+ * ========================================================= */
+
+static float pid_update(
+    PID_t *pid,
+    float setpoint,
+    float measured,
+    float dt)
+{
+    float error = setpoint - measured;
+
+    float p = pid->kp * error;
+
+    float derivative =
+        (error - pid->previous_error) / dt;
+
+    float d = pid->kd * derivative;
+
+    /*
+     * Candidate integral
+     */
+    float new_integral =
+        pid->integral + error * dt;
+
+    float i =
+        pid->ki * new_integral;
+
+    float output =
+        p + i + d;
+
+    /*
+     * Anti-windup:
+     *
+     * Only accept additional integral if:
+     * - output is not saturated
+     * OR
+     * - error is trying to pull the output back
+     *   from saturation.
+     */
+
+    if (output > pid->output_max)
+    {
+        output = pid->output_max;
+
+        if (error < 0.0f)
+        {
+            pid->integral =
+                new_integral;
+        }
+    }
+    else if (output < pid->output_min)
+    {
+        output = pid->output_min;
+
+        if (error > 0.0f)
+        {
+            pid->integral =
+                new_integral;
+        }
+    }
+    else
+    {
+        pid->integral =
+            new_integral;
+    }
+
+    pid->previous_error = error;
+
+    return output;
+}
+
+/* =========================================================
+ * MCP23017 Register Write
+ * ========================================================= */
+
+static bool mcp_write_register(
+    uint8_t reg,
+    uint8_t value)
+{
+    uint8_t data[2];
+
+    data[0] = reg;
+    data[1] = value;
+
+    int ret =
+        i2c_write_blocking(
+            I2C_PORT,
+            MCP_ADDR,
+            data,
+            2,
+            false
+        );
+
+    return (ret == 2);
+}
+
+
+/* =========================================================
+ * MCP23017 Initialization
+ * ========================================================= */
+
+static bool mcp_init(void)
+{
+    /*
+     * GPA0 = output
+     * GPA1...GPA7 = input
+     *
+     * 11111110 = 0xFE
+     */
+
+    if (!mcp_write_register(
+            MCP_IODIRA,
+            0xFE))
+    {
+        return false;
+    }
+
+
+    /*
+     * GPB0...GPB5 = outputs
+     * GPB6...GPB7 = inputs
+     *
+     * 11000000 = 0xC0
+     */
+
+    if (!mcp_write_register(
+            MCP_IODIRB,
+            0xC0))
+    {
+        return false;
+    }
+
+
+    /*
+     * Start all Port B outputs OFF
+     */
+
+    if (!mcp_write_register(
+            MCP_OLATB,
+            0x00))
+    {
+        return false;
+    }
+
+
+    /*
+     * Turn ON 24V using GPA0
+     */
+
+    if (!mcp_write_register(
+            MCP_OLATA,
+            ENABLE_24V_BIT))
+    {
+        return false;
+    }
+
+
+    return true;
+}
+
+
+/* =========================================================
+ * Heater Relay Control - GPB0
+ * ========================================================= */
+
+static bool heater_relay_on(void)
+{
+    return mcp_write_register(
+        MCP_OLATB,
+        HEATER_RELAY_BIT
+    );
+}
+
+
+static bool heater_relay_off(void)
+{
+    return mcp_write_register(
+        MCP_OLATB,
+        0x00
+    );
+}
+
+
+/* =========================================================
+ * ADS1115 Start AIN0
+ * ========================================================= */
+
+static bool ads1115_start_ain0(void)
+{
+    /*
+     * Config 0xC383
+     *
+     * AIN0 vs GND
+     * PGA +/-4.096 V
+     * single-shot
+     * 128 SPS
+     */
+
+    uint8_t data[3];
+
+    data[0] = 0x01;
+    data[1] = 0xC3;
+    data[2] = 0x83;
+
+    int ret =
+        i2c_write_blocking(
+            I2C_PORT,
+            ADS1115_ADDR,
+            data,
+            3,
+            false
+        );
+
+    if (ret != 3)
+    {
+        return false;
+    }
+
+    sleep_ms(10);
+
+    return true;
+}
+
+
+/* =========================================================
+ * ADS1115 Read AIN0
+ * ========================================================= */
+
+static bool ads1115_read_ain0(
+    int16_t *raw)
+{
+    if (!ads1115_start_ain0())
+    {
+        return false;
+    }
+
+    uint8_t reg = 0x00;
+    uint8_t data[2];
+
+    int ret =
+        i2c_write_blocking(
+            I2C_PORT,
+            ADS1115_ADDR,
+            &reg,
+            1,
+            true
+        );
+
+    if (ret != 1)
+    {
+        return false;
+    }
+
+    ret =
+        i2c_read_blocking(
+            I2C_PORT,
+            ADS1115_ADDR,
+            data,
+            2,
+            false
+        );
+
+    if (ret != 2)
+    {
+        return false;
+    }
+
+    *raw =
+        (int16_t)(
+            ((uint16_t)data[0] << 8)
+            |
+            data[1]
+        );
+
+    return true;
+}
+
+
+/* =========================================================
+ * ADS1115 Raw -> Voltage
+ * ========================================================= */
+
+static float raw_to_voltage(
+    int16_t raw)
+{
+    /*
+     * PGA = +/-4.096 V
+     * LSB = 0.000125 V
+     */
+
+    return ((float)raw * 0.000125f);
+}
+
+
+/* =========================================================
+ * Voltage -> Temperature
+ * ========================================================= */
+
+static float voltage_to_temperature(
+    float voltage)
+{
+    /*
+     * PCB designer mapping:
+     *
+     * -50 C  -> 0.00 V
+     * +250 C -> 2.50 V
+     *
+     * T = (V / 2.5) * 300 - 50
+     */
+
+    return
+        ((voltage / 2.50f) * 300.0f)
+        - 50.0f;
+}
+
+
+/* =========================================================
+ * MAIN
+ * ========================================================= */
+
+int main(void)
+{
+    stdio_init_all();
+
+    sleep_ms(2000);
+
+
+    /* =====================================================
+     * Initialize I2C
+     * ===================================================== */
+
+    i2c_init(
+        I2C_PORT,
+        100 * 1000
+    );
+
+    gpio_set_function(
+        SDA_PIN,
+        GPIO_FUNC_I2C
+    );
+
+    gpio_set_function(
+        SCL_PIN,
+        GPIO_FUNC_I2C
+    );
+
+    gpio_pull_up(SDA_PIN);
+    gpio_pull_up(SCL_PIN);
+
+
+    printf("\r\n");
+
+    printf(
+        "========================================\r\n"
+    );
+
+    printf(
+        " RP2350 PT1000 Heater Controller\r\n"
+    );
+
+    printf(
+        " Target = %.1f C\r\n",
+        TARGET_TEMP_C
+    );
+
+    printf(
+        "========================================\r\n"
+    );
+
+
+    /* =====================================================
+     * MCP Initialization
+     * ===================================================== */
+
+    if (!mcp_init())
+    {
+        printf(
+            "ERROR: MCP23017 INIT FAILED\r\n"
+        );
+
+        while (true)
+        {
+            sleep_ms(1000);
+        }
+    }
+
+
+    printf("MCP23017 OK\r\n");
+    printf("24V ENABLE ON\r\n");
+    printf("Heater relay GPB0 initialized OFF\r\n");
+
+
+    /*
+     * Wait for sensor electronics
+     */
+
+    sleep_ms(1000);
+
+
+    /* =====================================================
+     * PID Setup
+     * ===================================================== */
+
+   PID_t temperature_pid =
+{
+    .kp = 5.0f,
+    .ki = 0.001f,
+    .kd = 0.0f,
+
+    .integral = 0.0f,
+    .previous_error = 0.0f,
+
+    .output_min = 0.0f,
+    .output_max = 100.0f
+};
+
+
+    /* =====================================================
+     * Relay Window Timing
+     * ===================================================== */
+
+    absolute_time_t window_start =
+        get_absolute_time();
+
+    bool relay_state = false;
+
+
+    /* =====================================================
+     * Main Loop
+     * ===================================================== */
+
+    while (true)
+    {
+        int16_t raw = 0;
+
+
+        /* -------------------------------------------------
+         * Read Temperature
+         * ------------------------------------------------- */
+
+        if (!ads1115_read_ain0(&raw))
+        {
+            heater_relay_off();
+
+            relay_state = false;
+
+            temperature_pid.integral = 0.0f;
+
+            printf(
+                "ADS1115 ERROR | HEATER OFF\r\n"
+            );
+
+            sleep_ms(CONTROL_PERIOD_MS);
+
+            continue;
+        }
+
+
+        float voltage =
+            raw_to_voltage(raw);
+
+
+        /* -------------------------------------------------
+         * Sensor Sanity Check
+         * ------------------------------------------------- */
+
+        if (voltage < 0.0f ||
+            voltage > 2.55f)
+        {
+            heater_relay_off();
+
+            relay_state = false;
+
+            temperature_pid.integral = 0.0f;
+
+            printf(
+                "SENSOR ERROR | "
+                "V: %.4f | "
+                "HEATER OFF\r\n",
+                voltage
+            );
+
+            sleep_ms(CONTROL_PERIOD_MS);
+
+            continue;
+        }
+
+
+        float temperature =
+            voltage_to_temperature(
+                voltage
+            );
+
+
+        /* -------------------------------------------------
+         * Safety Cutoff
+         * ------------------------------------------------- */
+
+        bool over_temp =
+            (temperature >= MAX_TEMP_C);
+
+
+        float pid_output = 0.0f;
+
+
+        if (over_temp)
+        {
+            pid_output = 0.0f;
+
+            temperature_pid.integral = 0.0f;
+
+            heater_relay_off();
+
+            relay_state = false;
+        }
+        else
+        {
+            pid_output =
+                pid_update(
+                    &temperature_pid,
+                    TARGET_TEMP_C,
+                    temperature,
+                    CONTROL_PERIOD_MS / 1000.0f
+                );
+
+
+            int64_t elapsed_ms =
+                absolute_time_diff_us(
+                    window_start,
+                    get_absolute_time()
+                ) / 1000;
+
+
+            /*
+             * Start a new 10-second window
+             */
+
+            if (elapsed_ms >= RELAY_WINDOW_MS)
+            {
+                window_start =
+                    get_absolute_time();
+
+                elapsed_ms = 0;
+            }
+
+
+            /*
+             * Convert PID % into ON time
+             *
+             * Example:
+             *
+             * 50% of 10 seconds = 5000 ms ON
+             */
+
+            float required_on_ms =
+                (
+                    pid_output
+                    /
+                    100.0f
+                )
+                *
+                RELAY_WINDOW_MS;
+
+
+            /*
+             * Relay ON during the first part
+             * of each window.
+             */
+
+            bool required_relay_state =
+                (
+                    (float)elapsed_ms
+                    <
+                    required_on_ms
+                );
+
+
+            /*
+             * Only write to MCP when state changes.
+             *
+             * This avoids unnecessary I2C traffic.
+             */
+
+            if (required_relay_state != relay_state)
+            {
+                if (required_relay_state)
+                {
+                    heater_relay_on();
+
+                    relay_state = true;
+                }
+                else
+                {
+                    heater_relay_off();
+
+                    relay_state = false;
+                }
+            }
+        }
+
+
+       
+
+        printf(
+            "RAW:%5d | "
+            "V:%.4f | "
+            "TEMP:%6.2f C | "
+            "SET:%6.1f C | "
+            "PID:%6.1f %% | "
+            "HEATER:%s",
+
+            raw,
+            voltage,
+            temperature,
+            TARGET_TEMP_C,
+            pid_output,
+
+            relay_state
+                ? "ON"
+                : "OFF"
+        );
+
+
+        if (over_temp)
+        {
+            printf(
+                " | OVER TEMP"
+            );
+        }
+
+
+        printf("\r\n");
+
+
+        sleep_ms(
+            CONTROL_PERIOD_MS
+        );
+    }
+}

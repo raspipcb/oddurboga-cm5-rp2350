@@ -6,8 +6,6 @@
   Temp3 = outdoor optional (ADS CH2)     → API field OUTDOOR
 """
 
-from __future__ import annotations
-
 import config
 
 

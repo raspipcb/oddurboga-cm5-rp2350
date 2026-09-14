@@ -1,7 +1,5 @@
 """Low-level time/UART helpers + I2C open for RP2350 or host mock."""
 
-from __future__ import annotations
-
 try:
     from machine import I2C, Pin, UART  # type: ignore
     import time as _time
@@ -67,7 +65,11 @@ class UartPort:
         self._mock_rx = mock_lines if mock_lines is not None else []
         self._mock_tx = []
         if ON_DEVICE and mock_lines is None:
-            self._uart = UART(uart_id, baudrate=baud, tx=Pin(tx), rx=Pin(rx))
+            # Large RX buffer so CM5 bursts cannot overrun the FIFO while we
+            # service I2C in the control tick.
+            self._uart = UART(
+                uart_id, baudrate=baud, tx=Pin(tx), rx=Pin(rx), rxbuf=512,
+            )
         else:
             self._uart = None
 
@@ -88,16 +90,26 @@ class UartPort:
             while self._mock_rx:
                 self._buf.extend((self._mock_rx.pop(0) + "\n").encode("ascii"))
         while True:
-            try:
-                i = self._buf.index(0x0A)
-            except ValueError:
+            end = -1
+            for sep in (0x0A, 0x0D):
+                try:
+                    end = self._buf.index(sep)
+                    break
+                except ValueError:
+                    continue
+            if end < 0:
                 break
-            raw = bytes(self._buf[:i])
-            del self._buf[: i + 1]
+            raw = bytes(self._buf[:end])
+            del self._buf[: end + 1]
+            # Swallow a paired CRLF or LFCR.
+            while self._buf[:1] in (b"\r", b"\n"):
+                del self._buf[:1]
             try:
-                lines.append(raw.decode("ascii", "ignore").strip())
+                line = raw.decode("ascii", "ignore").strip()
             except Exception:
                 continue
+            if line:
+                lines.append(line)
         return lines
 
 

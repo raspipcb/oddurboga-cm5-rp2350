@@ -1,6 +1,4 @@
-"""ADS1115 16-bit ADC @ 0x48 — three 4–20 mA temperature channels."""
-
-from __future__ import annotations
+"""ADS1115 16-bit ADC @ 0x49 — three 4–20 mA temperature channels."""
 
 import config
 
@@ -20,7 +18,7 @@ _DR_128 = 0x0080  # 128 SPS
 
 
 class ADS1115:
-    def __init__(self, i2c, addr=0x48, mock_volts=None):
+    def __init__(self, i2c, addr=0x49, mock_volts=None):
         self._i2c = i2c
         self._addr = addr
         self._mock = mock_volts  # dict channel→volts

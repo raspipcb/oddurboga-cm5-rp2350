@@ -4,8 +4,6 @@ When Temp2 rises ≥ FILL_RISE_C within FILL_RISE_WINDOW_S after inlet flow
 starts, water has reached the tub-wall probe. Overflow is a separate outlet.
 """
 
-from __future__ import annotations
-
 import config
 from hw import ticks_diff, ticks_ms
 

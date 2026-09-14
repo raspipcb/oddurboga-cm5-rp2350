@@ -19,21 +19,25 @@ UART_TX_PIN = 0
 UART_RX_PIN = 1
 
 # --- I2C1 on RP2350 (MCU_I2C1_SDA / MCU_I2C1_SCL) -------------------------
+# Schematic p.4: GPIO6 = SDA, GPIO7 = SCL (not GPIO2/3).
 I2C_ID = 1
-I2C_SDA_PIN = 2
-I2C_SCL_PIN = 3
+I2C_SDA_PIN = 6
+I2C_SCL_PIN = 7
 I2C_FREQ_HZ = 100_000
 
 MCP23017_ADDR = 0x20
-ADS1115_ADDR = 0x48
+# Schematic p.5: ADDR pin tied to 3V3 → 0x49 (not 0x48).
+ADS1115_ADDR = 0x49
 
-BIT_RELAY0 = 0
-BIT_RELAY1 = 1
-BIT_RELAY2 = 2
-BIT_RELAY3 = 3   # unused
-BIT_RELAY4 = 4   # unused
-BIT_RELAY5 = 5   # unused
-BIT_SENSOR_24V_EN = 6
+# MCP23017: GPA0 = SENSOR_24V_EN; GPB0..GPB5 = RELAY0..RELAY5.
+# Driver maps bits 0–7 → port A, 8–15 → port B.
+BIT_SENSOR_24V_EN = 0
+BIT_RELAY0 = 8
+BIT_RELAY1 = 9
+BIT_RELAY2 = 10
+BIT_RELAY3 = 11   # unused
+BIT_RELAY4 = 12   # unused
+BIT_RELAY5 = 13   # unused
 
 BIT_HOT = BIT_RELAY0           # hot water valve
 BIT_COLD = BIT_RELAY1          # cold water valve

@@ -1,6 +1,7 @@
-"""MCP23017 16-bit I/O expander @ 0x20 — drives the six plant relays."""
+"""MCP23017 16-bit I/O expander @ 0x20 — drives the six plant relays.
 
-from __future__ import annotations
+Bit map (see config.py): bit 0 = GPA0 (SENSOR_24V_EN), bits 8–13 = GPB0–GPB5 (RELAY0–5).
+"""
 
 # Register map (IOCON.BANK = 0).
 _IODIRA = 0x00

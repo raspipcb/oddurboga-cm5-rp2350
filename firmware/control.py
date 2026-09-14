@@ -1,7 +1,5 @@
 """Main plant controller: sequencing, setpoints, drain, recover."""
 
-from __future__ import annotations
-
 import config
 from actuators import Actuators
 from board import Board

@@ -153,3 +153,36 @@ def parse_number(text, default=None):
         return float(str(text).strip())
     except (TypeError, ValueError):
         return default
+
+
+def normalize_safety(value) -> str:
+    """Map legacy `LOCK` and current `LOCKED` to one token for the UI."""
+    token = str(value or "OK").strip().upper()
+    if token in ("LOCK", "LOCKED"):
+        return "LOCKED"
+    return token or "OK"
+
+
+def normalize_status(fields: dict | None) -> dict:
+    """Apply backward-compatible fixes to one STATUS/INFO field map."""
+    out = dict(fields or {})
+    if "SAFETY" in out:
+        out["SAFETY"] = normalize_safety(out["SAFETY"])
+    return out
+
+
+def is_line_noise(line: str) -> bool:
+    """Serial-console chatter that is not a controller reply."""
+    text = str(line or "").strip()
+    if not text:
+        return True
+    low = text.lower()
+    if low.startswith(("login:", "password:", "last login:", "welcome to")):
+        return True
+    if " login:" in low or low.endswith(" login"):
+        return True
+    if text in (">>>", "...", "MicroPython"):
+        return True
+    if text.startswith(">>>") or text.startswith("... "):
+        return True
+    return False

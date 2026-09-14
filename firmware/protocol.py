@@ -1,7 +1,5 @@
 """Line protocol matching doc/api.md, plus RECOVER for hard safety unlock."""
 
-from __future__ import annotations
-
 import config
 
 

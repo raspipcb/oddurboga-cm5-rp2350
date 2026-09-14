@@ -123,6 +123,7 @@ class MainWindow(QMainWindow):
             self._apply_link_status()
             self.poll_timer.start()
             self._last_safety = "OK"
+            self._fw_supports_recover = True
 
         if fullscreen or on_pi():
             self.showFullScreen()
@@ -176,7 +177,11 @@ class MainWindow(QMainWindow):
         safety = (fields.get("SAFETY") or "OK").upper()
         fault = (fields.get("FAULT") or "NONE").upper()
         # Edge-trigger: hard lock needs RECOVER (firmware cools cold valve locally).
-        if safety == "LOCKED" and getattr(self, "_last_safety", "OK") != "LOCKED":
+        if (
+            safety == "LOCKED"
+            and getattr(self, "_last_safety", "OK") != "LOCKED"
+            and getattr(self, "_fw_supports_recover", True)
+        ):
             self.toasts.show_toast(
                 f"{tr('err.SAFETY_LOCK')}: {fault} — {tr('api.recover')}",
                 LEVEL_ERROR,
@@ -187,7 +192,12 @@ class MainWindow(QMainWindow):
         self._last_safety = safety
 
     def _on_info(self, fields):
-        self.settings.apply_info(fields)
+        info = fields or {}
+        fw = str(info.get("FW") or "")
+        # Previous C firmware (1.0.x) has no RECOVER command.
+        if fw.startswith("1.0"):
+            self._fw_supports_recover = False
+        self.settings.apply_info(info)
 
     # ---- misc
 

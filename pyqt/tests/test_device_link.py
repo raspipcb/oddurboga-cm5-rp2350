@@ -14,6 +14,7 @@ import random
 import sys
 import threading
 import time
+from collections import deque
 from pathlib import Path
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -29,7 +30,8 @@ from device_link import (  # noqa: E402
     _CallQueue, Call,
 )
 from protocol import (  # noqa: E402
-    KIND_ERROR, KIND_STATUS, KIND_UNKNOWN, build_command, parse_response,
+    KIND_ERROR, KIND_STATUS, KIND_UNKNOWN, build_command, is_line_noise,
+    normalize_safety, normalize_status, parse_response,
 )
 
 APP = QCoreApplication.instance() or QCoreApplication(sys.argv)
@@ -168,6 +170,81 @@ class ChaosTransport:
         return self.mock.read_line(timeout)
 
 
+class LegacyCFirmwareTransport:
+    """Reply shape from firmware/logs/RP CM5 MQTT.c (FW 1.0.x)."""
+
+    name = "legacy-c-fw"
+
+    def __init__(self):
+        self._pending = deque()
+        self._open = False
+
+    def open(self):
+        self._open = True
+
+    def close(self):
+        self._open = False
+        self._pending.clear()
+
+    def reset_input(self):
+        self._pending.clear()
+
+    def write_line(self, line):
+        if not self._open:
+            raise LinkError("legacy transport closed")
+        cmd = line.strip().upper()
+        if cmd == "PING":
+            self._pending.append("OK")
+        elif cmd == "GET_STATUS":
+            self._pending.append(
+                "STATUS MODE=AUTO TARGET=39.0 TUB=38.5 INLET=42.0 FLOW=OFF "
+                "DRAIN=CLOSED MIX=IDLE HEAT_CABLE=AUTO AUX=OFF "
+                "SAFETY=LOCK FAULT=INLET_OVERTEMP"
+            )
+        elif cmd == "GET_SYSTEM_INFO":
+            self._pending.append("INFO FW=1.0.0 STATE=READY")
+        elif cmd == "RECOVER":
+            self._pending.append("ERROR INVALID_CMD")
+        else:
+            self._pending.append("ERROR INVALID_CMD")
+
+    def read_line(self, timeout):
+        deadline = time.monotonic() + max(0.0, timeout)
+        while not self._pending:
+            if time.monotonic() >= deadline:
+                return ""
+            time.sleep(0.01)
+        return self._pending.popleft()
+
+
+class ConsoleNoiseTransport:
+    """Injects login prompts before the real reply."""
+
+    name = "console-noise"
+
+    def __init__(self):
+        self._mock = MockTransport(latency=0.0)
+        self._noise = True
+
+    def open(self):
+        self._mock.open()
+
+    def close(self):
+        self._mock.close()
+
+    def reset_input(self):
+        self._mock.reset_input()
+
+    def write_line(self, line):
+        self._mock.write_line(line)
+
+    def read_line(self, timeout):
+        if self._noise:
+            self._noise = False
+            return "raspberrypi login:"
+        return self._mock.read_line(timeout)
+
+
 class LateTransport:
     """Answers the previous request, one turn behind."""
 
@@ -214,6 +291,11 @@ def test_protocol():
     check("clamped high", build_command("SET_INLET_OFFSET", 99.0) == "SET_INLET_OFFSET 5.0")
     check("clamped low", build_command("SET_TUB_CAL", -99.0) == "SET_TUB_CAL -10.0")
     check("bool param", build_command("SET_FROST_ACTIVE", True) == "SET_FROST_ACTIVE 1")
+    check("legacy LOCK normalizes", normalize_safety("LOCK") == "LOCKED")
+    check("LOCKED unchanged", normalize_safety("LOCKED") == "LOCKED")
+    check("status SAFETY normalized", normalize_status({"SAFETY": "LOCK"})["SAFETY"] == "LOCKED")
+    check("console login is noise", is_line_noise("raspberrypi login:"))
+    check("real reply is not noise", not is_line_noise("STATUS MODE=AUTO"))
 
 
 def test_queue():
@@ -359,6 +441,27 @@ def test_send_never_blocks():
     check("send stays sub-millisecond", worst < 0.05, f"worst={worst * 1000:.2f} ms")
 
 
+def test_legacy_c_firmware():
+    print("\nlegacy C firmware (1.0.x) replies")
+    _, results, _ = run_link(
+        LegacyCFirmwareTransport(),
+        [("PING", None), ("GET_STATUS", None), ("GET_SYSTEM_INFO", None), ("RECOVER", None)],
+    )
+    check("all four answered", len(results) == 4, f"got {len(results)}")
+    check("PING ok", results[0].ok)
+    status = results[1].response
+    check("STATUS ok", status is not None and status.ok)
+    check("legacy SAFETY field present", status and status.fields.get("SAFETY") == "LOCK")
+    check("RECOVER invalid on 1.0.x", results[3].code == "INVALID_CMD")
+
+
+def test_console_noise_ignored():
+    print("\nserial console noise before reply")
+    _, results, _ = run_link(ConsoleNoiseTransport(), [("PING", None)])
+    check("one result", len(results) == 1)
+    check("noise ignored, PING ok", results and results[0].ok)
+
+
 def test_repeated_start_stop():
     print("\nrepeated start/stop cycles")
     link = DeviceLink(port=None, mock=True)
@@ -386,6 +489,8 @@ def main():
     test_missing_port()
     test_chaos()
     test_late_reply_not_misattributed()
+    test_legacy_c_firmware()
+    test_console_noise_ignored()
     test_flood_is_bounded()
     test_send_never_blocks()
     test_repeated_start_stop()

@@ -3,8 +3,6 @@
 Interlock: hot and cold are never energized together. Full travel ≈ 60 s.
 """
 
-from __future__ import annotations
-
 import config
 from hw import ticks_diff, ticks_ms
 

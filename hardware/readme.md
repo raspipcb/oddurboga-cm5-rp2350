@@ -16,14 +16,16 @@ The main board can assign the shared I2C bus to either the CM5 or the RP2350 via
 | UART    | CM_UART0 ↔ MCU_UART0  | PyQt ↔ firmware API (always)              |
 
 
-CM5 runs Linux + the PyQt app and **must not** drive the expander/ADC while the I2C jumper selects the RP2350. The app only uses the serial port (`/dev/serial0`, 115200 8N1).
+CM5 runs Linux + the PyQt app and **must not** drive the expander/ADC while the I2C jumper selects the RP2350. The app only uses the UART (`/dev/ttyAMA0` on the tested CM5 carrier, 115200 8N1). See [`doc/oddurboga-bringup-report-1.pdf`](../doc/oddurboga-bringup-report-1.pdf).
 
 ```text
   PyQt (CM5)  --UART0--  RP2350 firmware
                             |
-                     I2C1 --+-- MCP23017 @ 0x20  (6 relays)
-                            +-- ADS1115  @ 0x48  (3× 4–20 mA → °C)
+                     I2C1 --+-- MCP23017 @ 0x20  (6 relays, GPB0–5)
+                            +-- ADS1115  @ 0x49  (3× 4–20 mA → °C)
 ```
+
+RP2350 I2C1: **GPIO6 = SDA**, **GPIO7 = SCL**. MCP23017: **GPA0** = `SENSOR_24V_EN`, **GPB0–GPB5** = `RELAY0–RELAY5`.
 
 
 
@@ -35,7 +37,7 @@ CM5 runs Linux + the PyQt app and **must not** drive the expander/ADC while the 
 | RP2350A + 16 MB flash | —            | Plant controller                   |
 | CM5                   | —            | HMI / OS                           |
 | MCP23017              | `0x20`       | 6× relay outputs + `SENSOR_24V_EN` |
-| ADS1115               | `0x48`       | 16-bit ADC, AIN0–2 from RCV420     |
+| ADS1115               | `0x49`       | 16-bit ADC, AIN0–2 from RCV420 (ADDR→3V3) |
 | RCV420 ×3             | —            | 4–20 mA → ~0–2.5 V                 |
 | Sensor board (×3)     | 4–20 mA loop | PT1000 + XTR112 (TIPD202-style)    |
 

@@ -1,7 +1,5 @@
 """Local safety latch: overtemp + valve timeout → HARD lock until RECOVER."""
 
-from __future__ import annotations
-
 import config
 
 

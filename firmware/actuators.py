@@ -1,7 +1,5 @@
 """Timed relay drives — Relay0=hot, Relay1=cold, Relay2=drain."""
 
-from __future__ import annotations
-
 import config
 from hw import ticks_diff, ticks_ms
 

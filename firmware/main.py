@@ -10,11 +10,9 @@ Boot:
   3. Loop: UART commands + control tick
 """
 
-from __future__ import annotations
-
 import config
 from control import Controller
-from hw import ON_DEVICE, UartPort, sleep_ms
+from hw import ON_DEVICE, UartPort, sleep_ms, ticks_diff, ticks_ms
 from protocol import Protocol
 
 
@@ -27,16 +25,23 @@ def main(mock=False):
         config.UART_ID, config.UART_BAUD, config.UART_TX_PIN, config.UART_RX_PIN,
         mock_lines=[] if mock else None,
     )
-    uart.write_line("INFO FW=%s STATE=READY" % config.FW_VERSION)
+    # Do not emit unsolicited INFO here — the CM5 host calls GET_SYSTEM_INFO
+    # on connect. Boot spam can be mistaken for a late reply and wedge the UI.
 
     period_ms = int(config.CONTROL_PERIOD_S * 1000)
+    uart_poll_ms = 20
+    next_tick = ticks_ms()
     while True:
+        # UART has priority: never block command handling behind a slow I2C tick.
         for line in uart.read_lines():
             reply = proto.handle(line)
             if reply:
                 uart.write_line(reply)
-        ctl.tick()
-        sleep_ms(period_ms)
+        now = ticks_ms()
+        if ticks_diff(now, next_tick) >= period_ms:
+            ctl.tick()
+            next_tick = now
+        sleep_ms(uart_poll_ms)
 
 
 if __name__ == "__main__":

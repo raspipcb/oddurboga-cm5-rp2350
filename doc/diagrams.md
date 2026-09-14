@@ -84,7 +84,7 @@ flowchart TB
     end
 
     MCP["MCP23017 @ 0x20<br/>IO expander<br/>RELAY0..2 used<br/>RELAY3..5 unused"]
-    ADS["ADS1115 @ 0x48<br/>16-bit ADC"]
+    ADS["ADS1115 @ 0x49<br/>16-bit ADC"]
     RCV["RCV420 ×3<br/>4–20 mA → 0–2.5 V"]
 
     I2C --> MCP

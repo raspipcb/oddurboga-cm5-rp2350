@@ -9,7 +9,7 @@
 
 The main-board **I2C jumper** is set to **MCU-I2C1** (RP2350) so the expander and ADC are not on the CM5 bus. UART is always cross-connected: `CM_UART0` ↔ `MCU_UART0`.
 
-Command set: [`doc/api.md`](../doc/api.md). Hardware notes: [`hardware/readme.md`](../hardware/readme.md).
+Command set: [`doc/api.md`](../doc/api.md). Hardware notes: [`hardware/readme.md`](../hardware/readme.md). Bring-up findings: [`doc/oddurboga-bringup-report-1.pdf`](../doc/oddurboga-bringup-report-1.pdf).
 
 ## Plant map (system diagram)
 
@@ -57,7 +57,7 @@ firmware/
 1. Confirm I2C jumper = RP2350 and UART cross-link.
 2. Adjust `config.py` GPIO / relay-bit map if your PCB routing differs.
 3. Calibrate `LOOP_T_AT_*` after measuring a known bath temperature.
-4. Copy `*.py` to the device; `import main` (or enable `boot.py`).
+4. Copy `*.py` to the device. `boot.py` starts `main.py` automatically after reset.
 
 ```bash
 python firmware/tests/test_firmware.py

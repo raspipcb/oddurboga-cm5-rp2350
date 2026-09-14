@@ -31,10 +31,12 @@ from PyQt5.QtCore import QObject, pyqtSignal
 from api_log import FAIL, RX, STRAY, TX, log
 from protocol import (
     KIND_ERROR, KIND_INFO, KIND_STATUS, MAX_LINE_BYTES, TERMINATOR, Response,
-    build_command, parse_response,
+    build_command, is_line_noise, normalize_status, parse_response,
 )
 
-DEFAULT_PORT_LINUX = "/dev/serial0"
+# CM5 carrier bring-up (Sep 2026): UART to RP2350 is /dev/ttyAMA0.
+LINUX_PORT_CANDIDATES = ("/dev/ttyAMA0", "/dev/serial0", "/dev/ttyAMA10")
+DEFAULT_PORT_LINUX = LINUX_PORT_CANDIDATES[0]
 DEFAULT_BAUD = 115200
 DEFAULT_TIMEOUT = 1.0
 QUEUE_LIMIT = 32
@@ -230,15 +232,22 @@ class SerialTransport:
         except ImportError as exc:
             raise LinkError(f"pyserial not installed: {exc}") from exc
         try:
-            self._serial = serial.Serial(
-                port=self.port,
-                baudrate=self.baud,
-                bytesize=serial.EIGHTBITS,
-                parity=serial.PARITY_NONE,
-                stopbits=serial.STOPBITS_ONE,
-                timeout=0.2,
-                write_timeout=1.0,
-            )
+            kwargs = {
+                "port": self.port,
+                "baudrate": self.baud,
+                "bytesize": serial.EIGHTBITS,
+                "parity": serial.PARITY_NONE,
+                "stopbits": serial.STOPBITS_ONE,
+                "timeout": 0.2,
+                "write_timeout": 1.0,
+                "dsrdtr": False,
+                "rtscts": False,
+            }
+            try:
+                self._serial = serial.Serial(**kwargs, exclusive=True)
+            except TypeError:
+                # pyserial < 3.3 on older Pi images
+                self._serial = serial.Serial(**kwargs)
         except Exception as exc:
             raise LinkError(f"cannot open {self.port}: {exc}") from exc
 
@@ -526,6 +535,9 @@ class DeviceLink(QObject):
             if not line:
                 time.sleep(0.001)
                 continue
+            if is_line_noise(line):
+                log.debug("%s %s", STRAY, line[:120])
+                continue
 
             response = parse_response(line)
             if response.answered:
@@ -542,9 +554,9 @@ class DeviceLink(QObject):
 
     def _publish(self, response: Response):
         if response.kind == KIND_STATUS and response.fields:
-            self.status_updated.emit(dict(response.fields))
+            self.status_updated.emit(normalize_status(response.fields))
         elif response.kind == KIND_INFO and response.fields:
-            self.info_updated.emit(dict(response.fields))
+            self.info_updated.emit(normalize_status(response.fields))
 
     def _finish(self, result: Result):
         self.call_finished.emit(result)
@@ -571,5 +583,9 @@ class DeviceLink(QObject):
 def default_port() -> str | None:
     """Best guess for CM_UART0 on the host we're running on."""
     if sys.platform.startswith("linux"):
-        return DEFAULT_PORT_LINUX
+        import os
+
+        for path in LINUX_PORT_CANDIDATES:
+            if os.path.exists(path):
+                return path
     return None

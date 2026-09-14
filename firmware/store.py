@@ -1,7 +1,5 @@
 """Persistent settings and learned fill statistics."""
 
-from __future__ import annotations
-
 import json
 
 import config
