@@ -1,6 +1,7 @@
-"""Hot / cold inlet valves (Relay 0 / Relay 1) with open-loop mix estimate.
+"""Hot / cold mixing valves (Relay 1 / Relay 2) with open-loop mix estimate.
 
 Interlock: hot and cold are never energized together. Full travel ≈ 60 s.
+Flow shutoff (Relay 0) is managed by the controller, not this module.
 """
 
 import config

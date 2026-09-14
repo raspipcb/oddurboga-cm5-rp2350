@@ -76,6 +76,7 @@ def test_precool_before_flow():
         ctl = make_ctl(tub=34.0, inlet=22.0)
         check("start accepted", ctl.start_flow() == "OK")
         check("phase precool", ctl.phase == Controller.PHASE_PRECOOL)
+        check("flow relay during precool", ctl.actuators.flow.active)
         check("cold valve during precool", ctl.actuators.cold.active)
         check("hot valve off during precool", not ctl.actuators.hot.active)
         pump(ctl, 0.55)
@@ -96,7 +97,8 @@ def test_inlet_overtemp_kills_flow():
     ctl.tick()
     check("safety locked", ctl.safety.state == "LOCKED")
     check("fault inlet", ctl.safety.fault == "INLET_OVERTEMP")
-    check("inlet valves closed", not ctl.actuators.inlet_open())
+    check("flow relay off", not ctl.actuators.flow.active)
+    check("mixer closed", not ctl.actuators.mixing_open())
     p = Protocol(ctl)
     check("start blocked", p.handle("START_FLOW") == "ERROR SAFETY_LOCK")
     check("clear_fault blocked", p.handle("CLEAR_FAULT") == "ERROR SAFETY_LOCK")
@@ -109,7 +111,8 @@ def test_tub_overtemp_opens_drain():
     ctl.actuators.hot.request(True)
     ctl.tick()
     check("fault tub", ctl.safety.fault == "TUB_OVERTEMP")
-    check("inlet valves closed", not ctl.actuators.inlet_open())
+    check("flow relay off", not ctl.actuators.flow.active)
+    check("mixer closed", not ctl.actuators.mixing_open())
     check("drain requested open", ctl.drain_wanted == "OPEN")
     check("drain coil on", ctl.actuators.drain.active)
 
@@ -177,6 +180,36 @@ def test_fill_detection_and_eta():
         config.FILL_RISE_WINDOW_S = old_w
 
 
+def test_heat_cable_auto_outdoor():
+    print("\nheat cable AUTO from outdoor temp")
+    ctl = make_ctl(outdoor=3.0)
+    ctl.set_heat_cable("AUTO")
+    ctl.tick()
+    check("on below 5C", ctl.actuators.heat_cable.active)
+    ctl.sensors.set_mock(outdoor=6.0)
+    ctl.sensors.update()
+    ctl.tick()
+    check("off at or above 5C", not ctl.actuators.heat_cable.active)
+
+
+def test_aux_timed_run():
+    print("\naux timed relay")
+    old_min, old_max = config.AUX_DURATION_MIN_S, config.AUX_DURATION_MAX_S
+    config.AUX_DURATION_MIN_S = 0.3
+    config.AUX_DURATION_MAX_S = 10.0
+    try:
+        ctl = make_ctl()
+        ctl.set_aux_duration(0.5)
+        ctl.set_aux(True)
+        ctl.tick()
+        check("aux on", ctl.actuators.aux.active)
+        pump(ctl, 0.85)
+        check("aux auto off", not ctl.actuators.aux.active)
+        check("aux flag cleared", not ctl.aux_on)
+    finally:
+        config.AUX_DURATION_MIN_S, config.AUX_DURATION_MAX_S = old_min, old_max
+
+
 def test_calibration_applied():
     print("\ntub calibration")
     ctl = make_ctl(tub=38.0)
@@ -195,6 +228,8 @@ def main():
     test_valve_timeout()
     test_recover_cools_then_unlocks()
     test_fill_detection_and_eta()
+    test_heat_cable_auto_outdoor()
+    test_aux_timed_run()
     test_calibration_applied()
     print("\n%d passed, %d failed" % (len(PASSED), len(FAILED)))
     for f in FAILED:

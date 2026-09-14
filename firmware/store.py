@@ -15,6 +15,7 @@ class Store:
         self.frost_delay_s = config.DEFAULT_FROST_DELAY_S
         self.frost_active = 0
         self.heat_cable = "AUTO"
+        self.aux_duration_s = config.AUX_DURATION_DEFAULT_S
         self.mode = "AUTO"
         self.fill_times = []  # recent fill durations (seconds)
         self.learned_drop_c = config.DEFAULT_INLET_OFFSET_C
@@ -33,6 +34,7 @@ class Store:
         self.frost_delay_s = float(data.get("frost_delay_s", self.frost_delay_s))
         self.frost_active = int(data.get("frost_active", self.frost_active))
         self.heat_cable = str(data.get("heat_cable", self.heat_cable))
+        self.aux_duration_s = float(data.get("aux_duration_s", self.aux_duration_s))
         self.mode = str(data.get("mode", self.mode))
         fills = data.get("fills_times") or data.get("fills_s") or data.get("fill_s") or []
         self.fill_times = [float(x) for x in fills][-config.FILL_HISTORY :]
@@ -47,6 +49,7 @@ class Store:
             "frost_delay_s": self.frost_delay_s,
             "frost_active": self.frost_active,
             "heat_cable": self.heat_cable,
+            "aux_duration_s": self.aux_duration_s,
             "mode": self.mode,
             "fills_times": self.fill_times[-config.FILL_HISTORY :],
             "learned_drop_c": self.learned_drop_c,

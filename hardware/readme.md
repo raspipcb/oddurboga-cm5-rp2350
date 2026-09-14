@@ -44,14 +44,16 @@ RP2350 I2C1: **GPIO6 = SDA**, **GPIO7 = SCL**. MCP23017: **GPA0** = `SENSOR_24V_
 
 
 
-## Three valves / three sensors (system diagram)
+## Six relays / three sensors (system diagram)
 
 | # | Plant role | Electrical |
 |---|------------|------------|
-| Valve | **Hot** water | **Relay 0** |
-| Valve | **Cold** water | **Relay 1** |
-| Valve | **Drain** to sewer | **Relay 2** (energized = open) |
-| — | Relays 3–5 | **Unused** |
+| Valve | **Flow** (main inlet shutoff) | **Relay 0** |
+| Valve | **Hot** water (mixer) | **Relay 1** |
+| Valve | **Cold** water (mixer) | **Relay 2** |
+| Valve | **Drain** to sewer | **Relay 3** (energized = open) |
+| Output | **Heat cable** (outdoor &lt; 5 °C in AUTO) | **Relay 4** |
+| Output | **Aux** (timed shower / cold-tub) | **Relay 5** |
 | Temp 1 | Inlet / between heat meter & mixer | ADS CH0 → firmware `INLET` |
 | Temp 2 | Tub wall (not overflow) | ADS CH1 → firmware `TUB` |
 | Temp 3 | Outdoor (optional) | ADS CH2 → firmware `OUTDOOR` |

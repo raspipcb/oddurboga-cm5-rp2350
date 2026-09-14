@@ -5,15 +5,14 @@ P&ID-style naming where Mermaid allows (valves, sensors, controllers).
 
 Relay assignment (production):
 
-| Relay | Valve |
+| Relay | Output |
 |-------|--------|
-| **0** | Hot water valve |
-| **1** | Cold water valve |
-| **2** | Drain valve |
-| 3–5 | Unused |
-
-Inlet “flow” is logical (`START_FLOW` / `STOP_FLOW`): water enters when the
-hot and/or cold valve is open. There is no separate flow relay.
+| **0** | Flow (main inlet shutoff) |
+| **1** | Hot water valve |
+| **2** | Cold water valve |
+| **3** | Drain valve |
+| **4** | Heat cable |
+| **5** | Aux (timed shower / cold-tub) |
 
 ---
 
@@ -26,21 +25,22 @@ flowchart LR
     COLD["Cold water IN"]
   end
 
+  VF{{"XV-FLOW<br/>inlet shutoff<br/>Relay 0"}}
   T1(["TE Temp1<br/>inlet / mix"])
-  VH{{"XV-HOT<br/>hot water valve<br/>Relay 0"}}
-  VC{{"XV-COLD<br/>cold water valve<br/>Relay 1"}}
+  VH{{"XV-HOT<br/>hot water valve<br/>Relay 1"}}
+  VC{{"XV-COLD<br/>cold water valve<br/>Relay 2"}}
   MIX["Mixing manifold"]
   HC["Heating cable<br/>on feed pipe"]
   TUB[("Hot tub")]
   T2(["TE Temp2<br/>tub wall"])
   OF["Overflow<br/>to sewer"]
-  DRAIN{{"XV-DRAIN<br/>drain valve<br/>Relay 2"}}
+  DRAIN{{"XV-DRAIN<br/>drain valve<br/>Relay 3"}}
   SEWER["To sewer"]
   T3(["TE Temp3<br/>outdoor optional"])
 
   HOT --> VH --> MIX
   COLD --> VC --> MIX
-  MIX --> T1 --> HC --> TUB
+  MIX --> VF --> T1 --> HC --> TUB
   TUB --- T2
   TUB --> OF --> SEWER
   TUB --> DRAIN --> SEWER
@@ -59,9 +59,12 @@ Temp2 is a tub-wall probe. Overflow is a separate outlet to sewer — not the Te
 flowchart TB
   subgraph PLANT["Field devices"]
     direction LR
-    V0["XV-HOT<br/>Relay 0"]
-    V1["XV-COLD<br/>Relay 1"]
-    V2["XV-DRAIN<br/>Relay 2"]
+    V0["XV-FLOW<br/>Relay 0"]
+    V1["XV-HOT<br/>Relay 1"]
+    V2["XV-COLD<br/>Relay 2"]
+    V3["XV-DRAIN<br/>Relay 3"]
+    V4["Heat cable<br/>Relay 4"]
+    V5["Aux<br/>Relay 5"]
     S1["Temp1 PT1000<br/>4–20 mA"]
     S2["Temp2 PT1000<br/>tub wall"]
     S3["Temp3 PT1000<br/>4–20 mA"]
@@ -83,7 +86,7 @@ flowchart TB
       FW <--> I2C
     end
 
-    MCP["MCP23017 @ 0x20<br/>IO expander<br/>RELAY0..2 used<br/>RELAY3..5 unused"]
+    MCP["MCP23017 @ 0x20<br/>IO expander<br/>RELAY0..5"]
     ADS["ADS1115 @ 0x49<br/>16-bit ADC"]
     RCV["RCV420 ×3<br/>4–20 mA → 0–2.5 V"]
 
@@ -97,6 +100,9 @@ flowchart TB
   MCP -->|"Relay 0"| V0
   MCP -->|"Relay 1"| V1
   MCP -->|"Relay 2"| V2
+  MCP -->|"Relay 3"| V3
+  MCP -->|"Relay 4"| V4
+  MCP -->|"Relay 5"| V5
   S1 --> RCV
   S2 --> RCV
   S3 --> RCV
@@ -178,7 +184,7 @@ flowchart TD
       Reg -->|tub rise ≥5°C/10s| Fill[Fill learned / ETA]
       Reg -->|tub ≥ target| Idle2[Close hot+cold → IDLE]
       Idle -->|STOP_FLOW| Idle
-      LOCK[SAFETY LOCKED] -->|RECOVER| Rec[RECOVER<br/>Relay1 cold 40s]
+      LOCK[SAFETY LOCKED] -->|RECOVER| Rec[RECOVER<br/>Relay2 cold 40s]
       Rec -->|temps OK| Idle
     end
   end
@@ -187,8 +193,8 @@ flowchart TD
 ```
 
 **Soft-start note:** `START_FLOW` returns `OK` immediately. Locally the firmware
-opens **Relay 1 (cold)** for ~30 s, then bang-bang regulates with Relay 0 (hot) /
-Relay 1 (cold). Hot and cold are never on together.
+opens **Relay 0 (flow)** and **Relay 2 (cold)** for ~30 s, then bang-bang
+regulates with Relay 1 (hot) / Relay 2 (cold). Hot and cold are never on together.
 
 ---
 
@@ -200,9 +206,10 @@ sequenceDiagram
   participant UART as CM_UART0 ↔ MCU_UART0
   participant FW as RP2350 firmware
   participant MCP as MCP23017
-  participant R0 as Relay 0 (hot)
-  participant R1 as Relay 1 (cold)
-  participant R2 as Relay 2 (drain)
+  participant R0 as Relay 0 (flow)
+  participant R1 as Relay 1 (hot)
+  participant R2 as Relay 2 (cold)
+  participant R3 as Relay 3 (drain)
   participant ADS as ADS1115
   participant T1 as Temp1
   participant T2 as Temp2
@@ -213,16 +220,16 @@ sequenceDiagram
   FW-->>UART: OK
   UART-->>UI: OK (immediate)
 
-  Note over FW,R1: Soft-start locally — cold first (~30 s)
-  FW->>MCP: set Relay1 ON
-  MCP->>R1: cold valve open
-  FW->>MCP: set Relay0 OFF
-  MCP->>R0: hot valve closed
+  Note over FW,R2: Soft-start locally — flow + cold first (~30 s)
+  FW->>MCP: set Relay0 ON
+  MCP->>R0: flow valve open
+  FW->>MCP: set Relay2 ON
+  MCP->>R2: cold valve open
 
   Note over FW: Then regulate (hot/cold bang-bang)
-  FW->>MCP: set Relay0 / Relay1
-  MCP->>R0: hot as needed
-  MCP->>R1: cold as needed
+  FW->>MCP: set Relay1 / Relay2
+  MCP->>R1: hot as needed
+  MCP->>R2: cold as needed
 
   Note over T1,ADS: Continuous sensing (I2C)
   T1->>ADS: 4–20 mA (CH0)
@@ -232,8 +239,8 @@ sequenceDiagram
   ADS-->>FW: inlet / tub / outdoor °C
 
   opt Drain request
-    FW->>MCP: set Relay2 ON
-    MCP->>R2: drain valve open
+    FW->>MCP: set Relay3 ON
+    MCP->>R3: drain valve open
   end
 
   FW->>UART: STATUS … FLOW=ON PHASE=REGULATE …

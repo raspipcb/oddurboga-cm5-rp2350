@@ -174,6 +174,12 @@ class MockTransport:
                 return "ERROR INVALID_VALUE"
             self._state["DRAIN"] = "OPEN" if param.upper() == "OPEN" else "CLOSED"
             return "OK"
+        if cmd == "SET_AUX_DURATION":
+            try:
+                self._state["AUX_DURATION"] = float(param)
+            except ValueError:
+                return "ERROR INVALID_VALUE"
+            return "OK"
         if cmd in ("SET_HEAT_CABLE", "SET_AUX", "SET_FROST_ACTIVE", "SET_FROST_DELAY"):
             key = {"SET_HEAT_CABLE": "HEAT_CABLE", "SET_AUX": "AUX"}.get(cmd)
             if key:

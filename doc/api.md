@@ -239,9 +239,10 @@ OK
 ### START_FLOW
 
 Requests inlet fill/regulate to start or resume. The RP2350 replies `OK`
-immediately (or `ERROR …`), then runs soft-start locally: open cold for 30 s,
-then regulate with hot/cold. There is no separate flow relay — inlet water is
-admitted by Relay 0 (hot) and/or Relay 1 (cold).
+immediately (or `ERROR …`), then runs soft-start locally: open **flow (Relay 0)**,
+open **cold (Relay 2)** for 30 s, then regulate with **hot (Relay 1)** / **cold
+(Relay 2)**. Flow can be stopped independently of the mixer (user half-fill,
+overtemp on Temp 1).
 
 **Syntax**
 
@@ -257,7 +258,8 @@ OK
 
 ### STOP_FLOW
 
-Stops inlet fill by closing hot and cold valves. Does not drain the tub.
+Stops inlet fill by closing the **flow shutoff (Relay 0)** and both mixing
+valves. Does not drain the tub.
 
 **Syntax**
 
@@ -323,10 +325,9 @@ OK
 
 ### SET_HEAT_CABLE
 
-Controls the heat-cable operating mode.
+Controls the heat-cable operating mode (**Relay 4**).
 
--   `AUTO` — Allows the heat cable to follow higher-level
-    frost/weather control.
+-   `AUTO` — Energizes Relay 4 when outdoor Temp 3 is **below 5 °C**.
 -   `ON` — Manually requests heat-cable operation.
 -   `OFF` — Manually disables the heat cable.
 
@@ -350,8 +351,9 @@ OK
 
 ### SET_AUX
 
-Controls the reserved auxiliary function without exposing its physical
-relay assignment.
+Energizes **Relay 5** for a timed run (shower / cold-tub). Duration is set
+with `SET_AUX_DURATION` (180–600 s, default 300 s). Relay opens automatically
+when the timer expires.
 
 **Syntax**
 
@@ -370,6 +372,44 @@ SET_AUX OFF
 
 ```text
 OK
+```
+
+### SET_AUX_DURATION
+
+Sets how long **Relay 5** stays on after `SET_AUX ON`.
+
+**Syntax**
+
+```text
+SET_AUX_DURATION <seconds>
+```
+
+**Range:** 180–600 (3–10 minutes)
+
+**Example**
+
+```text
+SET_AUX_DURATION 300
+```
+
+**Response**
+
+```text
+OK
+```
+
+### GET_AUX_DURATION
+
+**Syntax**
+
+```text
+GET_AUX_DURATION
+```
+
+**Response**
+
+```text
+VALUE 300.0
 ```
 
 ### SET_FROST_ACTIVE
@@ -413,7 +453,7 @@ GET_STATUS
 **Suggested Response**
 
 ```text
-STATUS MODE=AUTO TARGET=39.0 TUB=38.4 INLET=42.0 OUTDOOR=7.0 FLOW=ON DRAIN=CLOSED MIX=HEATING HEAT_CABLE=OFF AUX=OFF SAFETY=OK FAULT=NONE ETA_MIN=12 FILL_S=180 PHASE=REGULATE
+STATUS MODE=AUTO TARGET=39.0 TUB=38.4 INLET=42.0 OUTDOOR=7.0 FLOW=ON DRAIN=CLOSED MIX=HEATING HEAT_CABLE=OFF AUX=OFF SAFETY=OK FAULT=NONE ETA_MIN=12 FILL_S=180 PHASE=REGULATE AUX_S=0
 ```
 
 Field meanings relative to the physical installation:
@@ -423,10 +463,11 @@ Field meanings relative to the physical installation:
 | `TUB` | **Temp 2** (ADS CH1) | Tub-wall water temperature (calibrated) |
 | `INLET` | **Temp 1** (ADS CH0) | Inlet / control-side mix temperature |
 | `OUTDOOR` | **Temp 3** (ADS CH2) | Outdoor ambient (optional) |
-| `FLOW` | Logical inlet state | `ON` when filling/regulating (hot and/or cold open); not a separate relay |
-| `DRAIN` | **Relay 2** drain valve | Bottom drain toward sewer |
-| `MIX` | **Relay 0/1** hot/cold | `PRECOOL` / `HEATING` / `COOLING` / `HOLD` / `IDLE` / `RECOVER` |
-| `HEAT_CABLE` | Software flag | Reserved; no dedicated relay on Relay 0–2 build |
+| `FLOW` | **Relay 0** flow shutoff | `ON` when inlet path is open |
+| `DRAIN` | **Relay 3** drain valve | Bottom drain toward sewer |
+| `MIX` | **Relay 1/2** hot/cold | `PRECOOL` / `HEATING` / `COOLING` / `HOLD` / `IDLE` / `RECOVER` |
+| `HEAT_CABLE` | **Relay 4** | `ON`/`OFF` (AUTO follows outdoor Temp 3 &lt; 5 °C) |
+| `AUX_S` | **Relay 5** timer | Seconds remaining when aux is active |
 | `ETA_MIN` | Fill learner | Estimated minutes until tub ready (0 when idle) |
 | `FILL_S` | Fill learner | Seconds since current fill started |
 | `PHASE` | Sequencer | `IDLE` / `PRECOOL` / `FLOW` / `REGULATE` / `RECOVER` |
@@ -479,7 +520,7 @@ OK
 Hard unlock (emulates a physical reset button). The reply is immediate
 `OK`. Locally the firmware then:
 
-1. Closes hot (Relay 0); opens cold (Relay 1) for 40 seconds.
+1. Closes flow (Relay 0) and mixer; opens cold (Relay 2) for 40 seconds.
 2. If sensors are back inside the safe band, clears `SAFETY=LOCKED` and resumes
    normal control; otherwise remains locked.
 
@@ -551,17 +592,17 @@ Hard rules enforced in firmware (`firmware/`):
 | Condition | Action |
 |-----------|--------|
 | Any valve relay continuously on for **120 s** | That drive forced OFF; `SAFETY=LOCKED`, `FAULT=VALVE_TIMEOUT`; wait for `RECOVER` |
-| **Temp 1** (inlet) ≥ **49.9 °C** | Close hot + cold; `SAFETY=LOCKED`, `FAULT=INLET_OVERTEMP` |
-| **Temp 2** (tub) ≥ **49.0 °C** | Close hot + cold **and** open drain; `SAFETY=LOCKED`, `FAULT=TUB_OVERTEMP` |
+| **Temp 1** (inlet) ≥ **49.9 °C** | Close flow + hot + cold; `SAFETY=LOCKED`, `FAULT=INLET_OVERTEMP` |
+| **Temp 2** (tub) ≥ **49.0 °C** | Close flow + hot + cold **and** open drain (Relay 3); `SAFETY=LOCKED`, `FAULT=TUB_OVERTEMP` |
 | Temp 1 or Temp 2 outside **−20…80 °C** | No valve activation; `FAULT=SENSOR_FAULT` |
 
-`RECOVER` opens **cold (Relay 1)** for 40 s, then clears the lock only if
+`RECOVER` opens **cold (Relay 2)** for 40 s, then clears the lock only if
 temperatures are healthy again. A physical reset button may call the same path.
 
 Fill soft-start (not a CM5 concern): `START_FLOW` returns `OK` immediately.
-Locally the firmware then opens **cold (Relay 1)** for 30 s, then bang-bang
-regulates hot (Relay 0) / cold (Relay 1) toward `target + inlet_offset`.
-Hot and cold are never energized together.
+Locally the firmware then opens **flow (Relay 0)** and **cold (Relay 2)** for 30 s,
+then bang-bang regulates **hot (Relay 1)** / **cold (Relay 2)** toward
+`target + inlet_offset`. Hot and cold are never energized together.
 
 Hot/cold mixing, sensor reading, fill-stop/reheat behavior, drain
 sequencing, and physical output timing also remain internal RP2350
@@ -590,8 +631,9 @@ exclusively — never open those I2C devices from Linux while this jumper is set
 -   Reading Temp 1, Temp 2, and Temp 3
 -   Applying Temp 2 (tub) calibration
 -   Real-time inlet-temperature control
--   Hot/cold inlet valve control (Relay 0 / Relay 1)
--   Physical drain valve (Relay 2)
+-   Flow shutoff (Relay 0) and hot/cold mixing (Relay 1 / Relay 2)
+-   Physical drain valve (Relay 3)
+-   Heat cable (Relay 4) and aux timed output (Relay 5)
 -   ADS1115 / 4–20 mA temperature acquisition
 -   Fill-stop and reheat logic
 -   Drain sequencing

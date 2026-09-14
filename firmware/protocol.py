@@ -103,6 +103,12 @@ class Protocol:
             c.set_aux(on)
             return _ok()
 
+        if cmd == "SET_AUX_DURATION":
+            return _ok() if c.set_aux_duration(float(param)) else _err("INVALID_VALUE")
+
+        if cmd == "GET_AUX_DURATION":
+            return _value(c.store.aux_duration_s)
+
         if cmd == "CLEAR_FAULT":
             result = c.clear_fault()
             return _ok() if result == "OK" else _err(result)

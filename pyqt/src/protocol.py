@@ -36,6 +36,7 @@ LIMITS = {
     "SET_INLET_OFFSET": (1.0, 5.0),
     "SET_REHEAT_HYST": (1.0, 5.0),
     "SET_TUB_CAL": (-10.0, 10.0),
+    "SET_AUX_DURATION": (180.0, 600.0),
 }
 
 ERROR_CODES = (
